@@ -25,13 +25,13 @@ import Workspace
 
 struct PrebuiltRepos: Identifiable {
     let url: URL
+    let prebuiltPackage: Workspace.PrebuiltsManager.PrebuiltPackage
     let versions: [Version]
 
     var id: URL { url }
 
     struct Version: Identifiable {
         let tag: String
-        let manifest: Workspace.PrebuiltsManifest
         let cModulePaths: [String: [String]]
 
         var id: String { tag }
@@ -41,33 +41,10 @@ struct PrebuiltRepos: Identifiable {
 var prebuiltRepos: IdentifiableSet<PrebuiltRepos> = [
     .init(
         url: .init(string: "https://github.com/swiftlang/swift-syntax")!,
+        prebuiltPackage: Workspace.PrebuiltsManager.prebuiltPackages[0],
         versions: [
             .init(
                 tag:"600.0.1",
-                manifest: .init(libraries: [
-                    .init(
-                        name: "MacroSupport",
-                        products: [
-                            "SwiftBasicFormat",
-                            "SwiftCompilerPlugin",
-                            "SwiftDiagnostics",
-                            "SwiftIDEUtils",
-                            "SwiftOperators",
-                            "SwiftParser",
-                            "SwiftParserDiagnostics",
-                            "SwiftRefactor",
-                            "SwiftSyntax",
-                            "SwiftSyntaxMacros",
-                            "SwiftSyntaxMacroExpansion",
-                            "SwiftSyntaxMacrosTestSupport",
-                            "SwiftSyntaxMacrosGenericTestSupport",
-                        ],
-                        cModules: [
-                            "_SwiftSyntaxCShims",
-                        ]
-                    ),
-
-                ]),
                 cModulePaths: [
                     "_SwiftSyntaxCShims": ["Sources", "_SwiftSyntaxCShims"]
                 ]
@@ -76,7 +53,6 @@ var prebuiltRepos: IdentifiableSet<PrebuiltRepos> = [
     ),
 ]
 
-let manifestHost = URL(string: "https://github.com/dschaefer2/swift-syntax/releases/download")!
 let swiftVersion = "\(SwiftVersion.current.major).\(SwiftVersion.current.minor)"
 let dockerImageRoot = "swiftlang/swift:nightly-6.1-"
 
@@ -102,21 +78,25 @@ struct BuildPrebuilts: AsyncParsableCommand {
             try fm.removeItem(atPath: stageDir.pathString)
         }
         try fm.createDirectory(atPath: stageDir.pathString, withIntermediateDirectories: true)
-        _ = fm.changeCurrentDirectoryPath(stageDir.pathString)
+
+        let srcDir = stageDir.appending("src")
+        try fm.createDirectory(atPath: srcDir.pathString, withIntermediateDirectories: true)
 
         for repo in prebuiltRepos.values {
-            let repoDir = stageDir.appending(repo.url.lastPathComponent)
             let libDir = stageDir.appending("lib")
             let modulesDir = stageDir.appending("modules")
             let includesDir = stageDir.appending("include")
+
+            let repoDir = srcDir.appending(repo.url.lastPathComponent)
             let scratchDir = repoDir.appending(".build")
             let buildDir = scratchDir.appending("release")
             let srcModulesDir = buildDir.appending("Modules")
 
+            _ = fm.changeCurrentDirectoryPath(srcDir.pathString)
             try await shell("git clone \(repo.url)")
 
             for version in repo.versions {
-                let versionDir = stageDir.appending(version.tag)
+                let versionDir = stageDir.appending(components: repo.url.lastPathComponent, version.tag)
                 if !fm.fileExists(atPath: versionDir.pathString) {
                     try fm.createDirectory(atPath: versionDir.pathString, withIntermediateDirectories: true)
                 }
@@ -124,15 +104,11 @@ struct BuildPrebuilts: AsyncParsableCommand {
                 _ = fm.changeCurrentDirectoryPath(repoDir.pathString)
                 try await shell("git checkout \(version.tag)")
 
-                var newLibraries: IdentifiableSet<Workspace.PrebuiltsManifest.Library> = []
-
-                for library in version.manifest.libraries {
+                for library in repo.prebuiltPackage.libraries {
                     // TODO: this is assuming products map to target names which is not always true
                     try await shell("swift package add-product \(library.name) --type static-library --targets \(library.products.joined(separator: " "))")
 
-                    var newArtifacts: [Workspace.PrebuiltsManifest.Library.Artifact] = []
-
-                    for platform in Workspace.PrebuiltsManifest.Platform.allCases {
+                    for platform in Workspace.PrebuiltsManager.Platform.allCases {
                         guard canBuild(platform) else {
                             continue
                         }
@@ -188,53 +164,20 @@ struct BuildPrebuilts: AsyncParsableCommand {
                         let contents = try ByteString(Data(contentsOf: zipFile.asURL))
                         let checksum = SHA256().hash(contents).hexadecimalRepresentation
 
-                        newArtifacts.append(.init(platform: platform, checksum: checksum))
-
                         try fm.removeItem(atPath: libDir.pathString)
                         try fm.removeItem(atPath: modulesDir.pathString)
                         try fm.removeItem(atPath: includesDir.pathString)
                     }
 
-                    let newLibrary = Workspace.PrebuiltsManifest.Library(
-                        name: library.name,
-                        products: library.products,
-                        cModules: library.cModules,
-                        artifacts: newArtifacts
-                    )
-                    newLibraries.insert(newLibrary)
-
                     try await shell("git reset --hard")
                 }
-
-                if let oldManifest = try await downloadManifest(version: version) {
-                    // Add in elements from the old manifest we haven't generated
-                    for library in oldManifest.libraries {
-                        if var newLibrary = newLibraries[library.name] {
-                            var newArtifacts = IdentifiableSet<Workspace.PrebuiltsManifest.Library.Artifact>(newLibrary.artifacts)
-                            for oldArtifact in library.artifacts {
-                                if !newArtifacts.contains(id: oldArtifact.id) {
-                                    newArtifacts.insert(oldArtifact)
-                                }
-                            }
-                            newLibrary.artifacts = .init(newArtifacts.values)
-                            newLibraries.insert(newLibrary)
-                        } else {
-                            newLibraries.insert(library)
-                        }
-                    }
-                }
-                let newManifest = Workspace.PrebuiltsManifest(libraries: .init(newLibraries.values))
-
-                let encoder = JSONEncoder()
-                encoder.outputFormatting = .prettyPrinted
-                let manifestData = try encoder.encode(newManifest)
-                let manifestFile = versionDir.appending("\(swiftVersion)-manifest.json")
-                try manifestData.write(to: manifestFile.asURL)
             }
         }
+
+        try fm.removeItem(atPath: srcDir.pathString)
     }
 
-    func canBuild(_ platform: Workspace.PrebuiltsManifest.Platform) -> Bool {
+    func canBuild(_ platform: Workspace.PrebuiltsManager.Platform) -> Bool {
         if dockerOnly {
             return platform.os == .linux
         }
@@ -277,43 +220,9 @@ struct BuildPrebuilts: AsyncParsableCommand {
 #endif
         }
     }
-
-    func downloadManifest(version: PrebuiltRepos.Version) async throws -> Workspace.PrebuiltsManifest? {
-        let fm = FileManager.default
-        let manifestFile = swiftVersion + "-manifest.json"
-        let destination = stageDir.appending(components: version.tag, manifestFile)
-        if fm.fileExists(atPath: destination.pathString) {
-            do {
-                return try JSONDecoder().decode(
-                    Workspace.PrebuiltsManifest.self,
-                    from: Data(contentsOf: destination.asURL)
-                )
-            } catch {
-                // redownload it
-                try fm.removeItem(atPath: destination.pathString)
-            }
-        }
-        let manifestURL = manifestHost.appending(components: version.tag, manifestFile)
-        print("Downloading:", manifestURL.absoluteString)
-        let httpClient = HTTPClient()
-        var headers = HTTPClientHeaders()
-        headers.add(name: "Accept", value: "application/json")
-        var request = HTTPClient.Request(kind: .generic(.get), url: manifestURL)
-        request.options.validResponseCodes = [200]
-
-        let response = try? await httpClient.execute(request) { _, _ in }
-        if let body = response?.body {
-            return try JSONDecoder().decode(
-                Workspace.PrebuiltsManifest.self,
-                from: body
-            )
-        }
-
-        return nil
-    }
 }
 
-extension Workspace.PrebuiltsManifest.Platform {
+extension Workspace.PrebuiltsManager.Platform {
     var dockerTag: String? {
         switch self {
         case .ubuntu_jammy_aarch64, .ubuntu_jammy_x86_64:
@@ -330,7 +239,7 @@ extension Workspace.PrebuiltsManifest.Platform {
     }
 }
 
-extension Workspace.PrebuiltsManifest.Platform.Arch {
+extension Workspace.PrebuiltsManager.Platform.Arch {
     var dockerPlatform: String? {
         switch self {
         case .aarch64:

@@ -26,32 +26,22 @@ import _InternalTestSupport
 
 final class PrebuiltsTests: XCTestCase {
     let swiftVersion = "\(SwiftVersion.current.major).\(SwiftVersion.current.minor)"
+    let rootName = "Foo"
 
-    func initData(artifact: Data, swiftSyntaxVersion: String, swiftSyntaxURL: String? = nil) throws -> (Workspace.PrebuiltsManifest, MockPackage, MockPackage) {
+    /// Returns the root package and the workspace
+    func initWorkspace(
+        fs: InMemoryFileSystem,
+        sandbox: AbsolutePath,
+        httpClient: HTTPClient?,
+        archiver: Archiver?,
+        swiftSyntaxVersion: String,
+        swiftSyntaxURL: String? = nil,
+        triple: Triple? = nil
+    ) async throws -> MockWorkspace {
         let swiftSyntaxURL = swiftSyntaxURL ?? "https://github.com/swiftlang/swift-syntax"
 
-        let manifest = Workspace.PrebuiltsManifest(libraries: [
-            .init(
-                name: "MacroSupport",
-                products: [
-                    "SwiftSyntaxMacrosTestSupport",
-                    "SwiftCompilerPlugin",
-                    "SwiftSyntaxMacros"
-                ],
-                cModules: [
-                    "_SwiftSyntaxCShims"
-                ],
-                artifacts: [
-                    .init(
-                        platform: .macos_aarch64,
-                        checksum: SHA256().hash(ByteString(artifact)).hexadecimalRepresentation
-                    )
-                ]
-            )
-        ])
-
         let rootPackage = try MockPackage(
-            name: "Foo",
+            name: rootName,
             targets: [
                 MockTarget(
                     name: "FooMacros",
@@ -87,7 +77,6 @@ final class PrebuiltsTests: XCTestCase {
             ]
         )
 
-
         let swiftSyntax = try MockPackage(
             name: "swift-syntax",
             url: swiftSyntaxURL,
@@ -104,17 +93,31 @@ final class PrebuiltsTests: XCTestCase {
             versions: ["600.0.1", "600.0.2", "601.0.0"]
         )
 
-        return (manifest, rootPackage, swiftSyntax)
+        return try await MockWorkspace(
+            sandbox: sandbox,
+            fileSystem: fs,
+            roots: [
+                rootPackage
+            ],
+            packages: [
+                swiftSyntax
+            ],
+            prebuiltsManager: .init(
+                httpClient: httpClient,
+                archiver: archiver
+            ),
+            customHostTriple: triple ?? Triple("arm64-apple-macosx15.0")
+        )
     }
 
-    func checkSettings(_ rootPackage: ResolvedPackage, _ targetName: String, usePrebuilt: Bool) throws {
+    func checkSettings(_ rootPackage: ResolvedPackage, _ targetName: String, _ swiftSyntaxVersion: String?) throws {
         let target = try XCTUnwrap(rootPackage.underlying.modules.first(where: { $0.name == targetName }))
-        if usePrebuilt {
+        if let swiftSyntaxVersion {
             let swiftFlags = try XCTUnwrap(target.buildSettings.assignments[.OTHER_SWIFT_FLAGS]).flatMap({ $0.values })
-            XCTAssertTrue(swiftFlags.contains("-I/tmp/ws/.build/prebuilts/swift-syntax/\(self.swiftVersion)-MacroSupport-macos_aarch64/Modules".fixwin))
-            XCTAssertTrue(swiftFlags.contains("-I/tmp/ws/.build/prebuilts/swift-syntax/\(self.swiftVersion)-MacroSupport-macos_aarch64/include/_SwiftSyntaxCShims".fixwin))
+            XCTAssertTrue(swiftFlags.contains("-I/tmp/ws/.build/prebuilts/swift-syntax/\(swiftSyntaxVersion)/\(self.swiftVersion)-MacroSupport-macos_aarch64/Modules".fixwin))
+            XCTAssertTrue(swiftFlags.contains("-I/tmp/ws/.build/prebuilts/swift-syntax/\(swiftSyntaxVersion)/\(self.swiftVersion)-MacroSupport-macos_aarch64/include/_SwiftSyntaxCShims".fixwin))
             let ldFlags = try XCTUnwrap(target.buildSettings.assignments[.OTHER_LDFLAGS]).flatMap({ $0.values })
-            XCTAssertTrue(ldFlags.contains("/tmp/ws/.build/prebuilts/swift-syntax/\(self.swiftVersion)-MacroSupport-macos_aarch64/lib/libMacroSupport.a".fixwin))
+            XCTAssertTrue(ldFlags.contains("/tmp/ws/.build/prebuilts/swift-syntax/\(swiftSyntaxVersion)/\(self.swiftVersion)-MacroSupport-macos_aarch64/lib/libMacroSupport.a".fixwin))
         } else {
             XCTAssertNil(target.buildSettings.assignments[.OTHER_SWIFT_FLAGS])
             XCTAssertNil(target.buildSettings.assignments[.OTHER_LDFLAGS])
@@ -125,20 +128,13 @@ final class PrebuiltsTests: XCTestCase {
         let sandbox = AbsolutePath("/tmp/ws")
         let fs = InMemoryFileSystem()
 
-        let artifact = Data()
-        let (manifest, rootPackage, swiftSyntax) = try initData(artifact: artifact, swiftSyntaxVersion: "600.0.1")
-        let manifestData = try JSONEncoder().encode(manifest)
-
         let httpClient = HTTPClient { request, progressHandler in
             guard case .download(let fileSystem, let destination) = request.kind else {
                 throw StringError("invalid request \(request.kind)")
             }
 
-            if request.url == "https://download.swift.org/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-manifest.json" {
-                try fileSystem.writeFileContents(destination, data: manifestData)
-                return .okay()
-            } else if request.url == "https://download.swift.org/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-MacroSupport-macos_aarch64.zip" {
-                try fileSystem.writeFileContents(destination, data: artifact)
+            if request.url == "https://download.swift.org/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-MacroSupport-macos_aarch64.zip" {
+                try fileSystem.writeFileContents(destination, data: Data())
                 return .okay()
             } else {
                 XCTFail("Unexpected URL \(request.url)")
@@ -147,34 +143,26 @@ final class PrebuiltsTests: XCTestCase {
         }
 
         let archiver = MockArchiver(handler: { _, archivePath, destination, completion in
-            XCTAssertEqual(archivePath.pathString, "/home/user/caches/org.swift.swiftpm/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-MacroSupport-macos_aarch64.zip".fixwin)
-            XCTAssertEqual(destination.pathString, "/tmp/ws/.build/prebuilts/swift-syntax/\(self.swiftVersion)-MacroSupport-macos_aarch64".fixwin)
+            XCTAssertEqual(archivePath.pathString, "/tmp/ws/.build/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-MacroSupport-macos_aarch64.zip".fixwin)
+            XCTAssertEqual(destination.pathString, "/tmp/ws/.build/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-MacroSupport-macos_aarch64".fixwin)
             completion(.success(()))
         })
 
-        let workspace = try await MockWorkspace(
+        let workspace = try await initWorkspace(
+            fs: fs,
             sandbox: sandbox,
-            fileSystem: fs,
-            roots: [
-                rootPackage
-            ],
-            packages: [
-                swiftSyntax
-            ],
-            prebuiltsManager: .init(
-                httpClient: httpClient,
-                archiver: archiver
-            ),
-            customHostTriple: Triple("arm64-apple-macosx15.0")
+            httpClient: httpClient,
+            archiver: archiver,
+            swiftSyntaxVersion: "600.0.1"
         )
 
-        try await workspace.checkPackageGraph(roots: ["Foo"]) { modulesGraph, diagnostics in
+        try await workspace.checkPackageGraph(roots: [rootName]) { modulesGraph, diagnostics in
             XCTAssertTrue(diagnostics.filter({ $0.severity == .error || $0.severity == .warning }).isEmpty)
             let rootPackage = try XCTUnwrap(modulesGraph.rootPackages.first)
-            try checkSettings(rootPackage, "FooMacros", usePrebuilt: true)
-            try checkSettings(rootPackage, "FooTests", usePrebuilt: true)
-            try checkSettings(rootPackage, "Foo", usePrebuilt: false)
-            try checkSettings(rootPackage, "FooClient", usePrebuilt: false)
+            try checkSettings(rootPackage, "FooMacros", "600.0.1")
+            try checkSettings(rootPackage, "FooTests", "600.0.1")
+            try checkSettings(rootPackage, "Foo", nil)
+            try checkSettings(rootPackage, "FooClient", nil)
         }
     }
 
@@ -182,65 +170,50 @@ final class PrebuiltsTests: XCTestCase {
         let sandbox = AbsolutePath("/tmp/ws")
         let fs = InMemoryFileSystem()
 
-        let artifact = Data()
-        let (manifest, rootPackage, swiftSyntax) = try initData(artifact: artifact, swiftSyntaxVersion: "600.0.1")
-        let manifestData = try JSONEncoder().encode(manifest)
-
         let httpClient = HTTPClient { request, progressHandler in
             guard case .download(let fileSystem, let destination) = request.kind else {
                 throw StringError("invalid request \(request.kind)")
             }
 
-            if request.url == "https://download.swift.org/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-manifest.json" {
-                try fileSystem.writeFileContents(destination, data: manifestData)
-                return .okay()
-            } else if request.url == "https://download.swift.org/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-MacroSupport-macos_aarch64.zip" {
-                try fileSystem.writeFileContents(destination, data: artifact)
+            if request.url == "https://download.swift.org/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-MacroSupport-macos_aarch64.zip" {
+                try fileSystem.writeFileContents(destination, data: Data())
                 return .okay()
             } else {
                 // make sure it's the updated one
                 XCTAssertEqual(
                     request.url,
-                    "https://download.swift.org/prebuilts/swift-syntax/601.0.0/\(self.swiftVersion)-manifest.json"
+                    "https://download.swift.org/prebuilts/swift-syntax/601.0.0/\(self.swiftVersion)-MacroSupport-macos_aarch64.zip"
                 )
                 return .notFound()
             }
         }
 
         let archiver = MockArchiver(handler: { _, archivePath, destination, completion in
-            XCTAssertEqual(archivePath.pathString, "/home/user/caches/org.swift.swiftpm/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-MacroSupport-macos_aarch64.zip".fixwin)
-            XCTAssertEqual(destination.pathString, "/tmp/ws/.build/prebuilts/swift-syntax/\(self.swiftVersion)-MacroSupport-macos_aarch64".fixwin)
+            XCTAssertEqual(archivePath.pathString, "/tmp/ws/.build/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-MacroSupport-macos_aarch64.zip".fixwin)
+            XCTAssertEqual(destination.pathString, "/tmp/ws/.build/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-MacroSupport-macos_aarch64".fixwin)
             completion(.success(()))
         })
 
-        let workspace = try await MockWorkspace(
+        let workspace = try await initWorkspace(
+            fs: fs,
             sandbox: sandbox,
-            fileSystem: fs,
-            roots: [
-                rootPackage
-            ],
-            packages: [
-                swiftSyntax
-            ],
-            prebuiltsManager: .init(
-                httpClient: httpClient,
-                archiver: archiver
-            ),
-            customHostTriple: Triple("arm64-apple-macosx15.0")
+            httpClient: httpClient,
+            archiver: archiver,
+            swiftSyntaxVersion: "600.0.1"
         )
 
-        try await workspace.checkPackageGraph(roots: [rootPackage.name]) { modulesGraph, diagnostics in
+        try await workspace.checkPackageGraph(roots: [rootName]) { modulesGraph, diagnostics in
             XCTAssertTrue(diagnostics.filter({ $0.severity == .error || $0.severity == .warning }).isEmpty)
             let rootPackage = try XCTUnwrap(modulesGraph.rootPackages.first)
-            try checkSettings(rootPackage, "FooMacros", usePrebuilt: true)
-            try checkSettings(rootPackage, "FooTests", usePrebuilt: true)
-            try checkSettings(rootPackage, "Foo", usePrebuilt: false)
-            try checkSettings(rootPackage, "FooClient", usePrebuilt: false)
+            try checkSettings(rootPackage, "FooMacros", "600.0.1")
+            try checkSettings(rootPackage, "FooTests", "600.0.1")
+            try checkSettings(rootPackage, "Foo", nil)
+            try checkSettings(rootPackage, "FooClient", nil)
         }
 
         // Change the version of swift syntax to one that doesn't have prebuilts
         try workspace.closeWorkspace(resetState: false, resetResolvedFile: false)
-        let key = MockManifestLoader.Key(url: sandbox.appending(components: "roots", rootPackage.name).pathString)
+        let key = MockManifestLoader.Key(url: sandbox.appending(components: "roots", rootName).pathString)
         let oldManifest = try XCTUnwrap(workspace.manifestLoader.manifests[key])
         let oldSCM: PackageDependency.SourceControl
         if case let .sourceControl(scm) = oldManifest.dependencies[0] {
@@ -259,26 +232,26 @@ final class PrebuiltsTests: XCTestCase {
         let newManifest = oldManifest.with(dependencies: [newDep])
         workspace.manifestLoader.manifests[key] = newManifest
 
-        try await workspace.checkPackageGraph(roots: [rootPackage.name]) { modulesGraph, diagnostics in
+        try await workspace.checkPackageGraph(roots: [rootName]) { modulesGraph, diagnostics in
             XCTAssertTrue(diagnostics.filter({ $0.severity == .error || $0.severity == .warning }).isEmpty)
             let rootPackage = try XCTUnwrap(modulesGraph.rootPackages.first)
-            try checkSettings(rootPackage, "FooMacros", usePrebuilt: false)
-            try checkSettings(rootPackage, "FooTests", usePrebuilt: false)
-            try checkSettings(rootPackage, "Foo", usePrebuilt: false)
-            try checkSettings(rootPackage, "FooClient", usePrebuilt: false)
+            try checkSettings(rootPackage, "FooMacros", nil)
+            try checkSettings(rootPackage, "FooTests", nil)
+            try checkSettings(rootPackage, "Foo", nil)
+            try checkSettings(rootPackage, "FooClient", nil)
         }
 
         // Change it back
         try workspace.closeWorkspace(resetState: false, resetResolvedFile: false)
         workspace.manifestLoader.manifests[key] = oldManifest
 
-        try await workspace.checkPackageGraph(roots: [rootPackage.name]) { modulesGraph, diagnostics in
+        try await workspace.checkPackageGraph(roots: [rootName]) { modulesGraph, diagnostics in
             XCTAssertTrue(diagnostics.filter({ $0.severity == .error || $0.severity == .warning }).isEmpty)
             let rootPackage = try XCTUnwrap(modulesGraph.rootPackages.first)
-            try checkSettings(rootPackage, "FooMacros", usePrebuilt: true)
-            try checkSettings(rootPackage, "FooTests", usePrebuilt: true)
-            try checkSettings(rootPackage, "Foo", usePrebuilt: false)
-            try checkSettings(rootPackage, "FooClient", usePrebuilt: false)
+            try checkSettings(rootPackage, "FooMacros", "600.0.1")
+            try checkSettings(rootPackage, "FooTests", "600.0.1")
+            try checkSettings(rootPackage, "Foo", nil)
+            try checkSettings(rootPackage, "FooClient", nil)
         }
     }
 
@@ -286,20 +259,13 @@ final class PrebuiltsTests: XCTestCase {
         let sandbox = AbsolutePath("/tmp/ws")
         let fs = InMemoryFileSystem()
 
-        let artifact = Data()
-        let (manifest, rootPackage, swiftSyntax) = try initData(artifact: artifact, swiftSyntaxVersion: "600.0.1", swiftSyntaxURL: "git@github.com:swiftlang/swift-syntax.git")
-        let manifestData = try JSONEncoder().encode(manifest)
-
         let httpClient = HTTPClient { request, progressHandler in
             guard case .download(let fileSystem, let destination) = request.kind else {
                 throw StringError("invalid request \(request.kind)")
             }
 
-            if request.url == "https://download.swift.org/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-manifest.json" {
-                try fileSystem.writeFileContents(destination, data: manifestData)
-                return .okay()
-            } else if request.url == "https://download.swift.org/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-MacroSupport-macos_aarch64.zip" {
-                try fileSystem.writeFileContents(destination, data: artifact)
+            if request.url == "https://download.swift.org/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-MacroSupport-macos_aarch64.zip" {
+                try fileSystem.writeFileContents(destination, data: Data())
                 return .okay()
              } else {
                 XCTFail("Unexpected URL \(request.url)")
@@ -308,34 +274,27 @@ final class PrebuiltsTests: XCTestCase {
         }
 
         let archiver = MockArchiver(handler: { _, archivePath, destination, completion in
-            XCTAssertEqual(archivePath.pathString, "/home/user/caches/org.swift.swiftpm/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-MacroSupport-macos_aarch64.zip".fixwin)
-            XCTAssertEqual(destination.pathString, "/tmp/ws/.build/prebuilts/swift-syntax/\(self.swiftVersion)-MacroSupport-macos_aarch64".fixwin)
+            XCTAssertEqual(archivePath.pathString, "/tmp/ws/.build/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-MacroSupport-macos_aarch64.zip".fixwin)
+            XCTAssertEqual(destination.pathString, "/tmp/ws/.build/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-MacroSupport-macos_aarch64".fixwin)
             completion(.success(()))
         })
 
-        let workspace = try await MockWorkspace(
+        let workspace = try await initWorkspace(
+            fs: fs,
             sandbox: sandbox,
-            fileSystem: fs,
-            roots: [
-                rootPackage
-            ],
-            packages: [
-                swiftSyntax
-            ],
-            prebuiltsManager: .init(
-                httpClient: httpClient,
-                archiver: archiver
-            ),
-            customHostTriple: Triple("arm64-apple-macosx15.0")
+            httpClient: httpClient,
+            archiver: archiver,
+            swiftSyntaxVersion: "600.0.1",
+            swiftSyntaxURL: "git@github.com:swiftlang/swift-syntax.git"
         )
 
         try await workspace.checkPackageGraph(roots: ["Foo"]) { modulesGraph, diagnostics in
             XCTAssertTrue(diagnostics.filter({ $0.severity == .error }).isEmpty)
             let rootPackage = try XCTUnwrap(modulesGraph.rootPackages.first)
-            try checkSettings(rootPackage, "FooMacros", usePrebuilt: true)
-            try checkSettings(rootPackage, "FooTests", usePrebuilt: true)
-            try checkSettings(rootPackage, "Foo", usePrebuilt: false)
-            try checkSettings(rootPackage, "FooClient", usePrebuilt: false)
+            try checkSettings(rootPackage, "FooMacros", "600.0.1")
+            try checkSettings(rootPackage, "FooTests", "600.0.1")
+            try checkSettings(rootPackage, "Foo", nil)
+            try checkSettings(rootPackage, "FooClient", nil)
         }
     }
 
@@ -347,18 +306,12 @@ final class PrebuiltsTests: XCTestCase {
         let cacheFile = try AbsolutePath(validating: "/home/user/caches/org.swift.swiftpm/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-MacroSupport-macos_aarch64.zip")
         try fs.writeFileContents(cacheFile, data: artifact)
 
-        let (manifest, rootPackage, swiftSyntax) = try initData(artifact: artifact, swiftSyntaxVersion: "600.0.1")
-        let manifestData = try JSONEncoder().encode(manifest)
-
         let httpClient = HTTPClient { request, progressHandler in
             guard case .download(let fileSystem, let destination) = request.kind else {
                 throw StringError("invalid request \(request.kind)")
             }
 
-            if request.url == "https://download.swift.org/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-manifest.json" {
-                try fileSystem.writeFileContents(destination, data: manifestData)
-                return .okay()
-            } else if request.url == "https://download.swift.org/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-MacroSupport-macos_aarch64.zip" {
+            if request.url == "https://download.swift.org/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-MacroSupport-macos_aarch64.zip" {
                 XCTFail("Unexpect download of archive")
                 try fileSystem.writeFileContents(destination, data: artifact)
                 return .okay()
@@ -369,52 +322,40 @@ final class PrebuiltsTests: XCTestCase {
         }
 
         let archiver = MockArchiver(handler: { _, archivePath, destination, completion in
-            XCTAssertEqual(archivePath.pathString, "/home/user/caches/org.swift.swiftpm/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-MacroSupport-macos_aarch64.zip".fixwin)
-            XCTAssertEqual(destination.pathString, "/tmp/ws/.build/prebuilts/swift-syntax/\(self.swiftVersion)-MacroSupport-macos_aarch64".fixwin)
+            XCTAssertEqual(archivePath.pathString, "/tmp/ws/.build/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-MacroSupport-macos_aarch64.zip".fixwin)
+            XCTAssertEqual(destination.pathString, "/tmp/ws/.build/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-MacroSupport-macos_aarch64".fixwin)
             completion(.success(()))
         })
 
-        let workspace = try await MockWorkspace(
+        let workspace = try await initWorkspace(
+            fs: fs,
             sandbox: sandbox,
-            fileSystem: fs,
-            roots: [
-                rootPackage
-            ],
-            packages: [
-                swiftSyntax
-            ],
-            prebuiltsManager: .init(
-                httpClient: httpClient,
-                archiver: archiver
-            ),
-            customHostTriple: Triple("arm64-apple-macosx15.0")
+            httpClient: httpClient,
+            archiver: archiver,
+            swiftSyntaxVersion: "600.0.1"
         )
 
-        try await workspace.checkPackageGraph(roots: ["Foo"]) { modulesGraph, diagnostics in
+        try await workspace.checkPackageGraph(roots: [rootName]) { modulesGraph, diagnostics in
             XCTAssertTrue(diagnostics.filter({ $0.severity == .error }).isEmpty)
             let rootPackage = try XCTUnwrap(modulesGraph.rootPackages.first)
-            try checkSettings(rootPackage, "FooMacros", usePrebuilt: true)
-            try checkSettings(rootPackage, "FooTests", usePrebuilt: true)
-            try checkSettings(rootPackage, "Foo", usePrebuilt: false)
-            try checkSettings(rootPackage, "FooClient", usePrebuilt: false)
+            try checkSettings(rootPackage, "FooMacros", "600.0.1")
+            try checkSettings(rootPackage, "FooTests", "600.0.1")
+            try checkSettings(rootPackage, "Foo", nil)
+            try checkSettings(rootPackage, "FooClient", nil)
         }
     }
 
     func testUnsupportedSwiftSyntaxVersion() async throws {
         let sandbox = AbsolutePath("/tmp/ws")
         let fs = InMemoryFileSystem()
-
-        let artifact = Data()
-        let (_, rootPackage, swiftSyntax) = try initData(artifact: artifact, swiftSyntaxVersion: "600.0.2")
-
         let secondFetch = SendableBox(false)
 
         let httpClient = HTTPClient { request, progressHandler in
-            if request.url == "https://download.swift.org/prebuilts/swift-syntax/600.0.2/\(self.swiftVersion)-manifest.json" {
+            if request.url == "https://download.swift.org/prebuilts/swift-syntax/600.0.2/\(self.swiftVersion)-MacroSupport-macos_aarch64.zip" {
                 let secondFetch = await secondFetch.value
                 XCTAssertFalse(secondFetch, "unexpected second fetch")
                 return .notFound()
-             } else {
+            } else {
                 XCTFail("Unexpected URL \(request.url)")
                 return .notFound()
             }
@@ -425,28 +366,21 @@ final class PrebuiltsTests: XCTestCase {
             completion(.success(()))
         })
 
-        let workspace = try await MockWorkspace(
+        let workspace = try await initWorkspace(
+            fs: fs,
             sandbox: sandbox,
-            fileSystem: fs,
-            roots: [
-                rootPackage
-            ],
-            packages: [
-                swiftSyntax
-            ],
-            prebuiltsManager: .init(
-                httpClient: httpClient,
-                archiver: archiver
-            )
+            httpClient: httpClient,
+            archiver: archiver,
+            swiftSyntaxVersion: "600.0.2"
         )
 
         try await workspace.checkPackageGraph(roots: ["Foo"]) { modulesGraph, diagnostics in
             XCTAssertTrue(diagnostics.filter({ $0.severity == .error }).isEmpty)
             let rootPackage = try XCTUnwrap(modulesGraph.rootPackages.first)
-            try checkSettings(rootPackage, "FooMacros", usePrebuilt: false)
-            try checkSettings(rootPackage, "FooTests", usePrebuilt: false)
-            try checkSettings(rootPackage, "Foo", usePrebuilt: false)
-            try checkSettings(rootPackage, "FooClient", usePrebuilt: false)
+            try checkSettings(rootPackage, "FooMacros", nil)
+            try checkSettings(rootPackage, "FooTests", nil)
+            try checkSettings(rootPackage, "Foo", nil)
+            try checkSettings(rootPackage, "FooClient", nil)
         }
 
         await secondFetch.set(true)
@@ -454,10 +388,10 @@ final class PrebuiltsTests: XCTestCase {
         try await workspace.checkPackageGraph(roots: ["Foo"]) { modulesGraph, diagnostics in
             XCTAssertTrue(diagnostics.filter({ $0.severity == .error }).isEmpty)
             let rootPackage = try XCTUnwrap(modulesGraph.rootPackages.first)
-            try checkSettings(rootPackage, "FooMacros", usePrebuilt: false)
-            try checkSettings(rootPackage, "FooTests", usePrebuilt: false)
-            try checkSettings(rootPackage, "Foo", usePrebuilt: false)
-            try checkSettings(rootPackage, "FooClient", usePrebuilt: false)
+            try checkSettings(rootPackage, "FooMacros", nil)
+            try checkSettings(rootPackage, "FooTests", nil)
+            try checkSettings(rootPackage, "Foo", nil)
+            try checkSettings(rootPackage, "FooClient", nil)
         }
     }
 
@@ -465,22 +399,13 @@ final class PrebuiltsTests: XCTestCase {
         let sandbox = AbsolutePath("/tmp/ws")
         let fs = InMemoryFileSystem()
 
-        let artifact = Data()
-        let (manifest, rootPackage, swiftSyntax) = try initData(artifact: artifact, swiftSyntaxVersion: "600.0.1")
-        let manifestData = try JSONEncoder().encode(manifest)
-
         let httpClient = HTTPClient { request, progressHandler in
-            guard case .download(let fileSystem, let destination) = request.kind else {
+            guard case .download(let fileSystem, _) = request.kind else {
                 throw StringError("invalid request \(request.kind)")
             }
 
-            if request.url == "https://download.swift.org/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-manifest.json" {
-                try fileSystem.writeFileContents(destination, data: manifestData)
-                return .okay()
-             } else {
-                XCTFail("Unexpected URL \(request.url)")
-                return .notFound()
-            }
+            XCTFail("Unexpected URL \(request.url)")
+            return .notFound()
         }
 
         let archiver = MockArchiver(handler: { _, archivePath, destination, completion in
@@ -488,29 +413,22 @@ final class PrebuiltsTests: XCTestCase {
             completion(.success(()))
         })
 
-        let workspace = try await MockWorkspace(
+        let workspace = try await initWorkspace(
+            fs: fs,
             sandbox: sandbox,
-            fileSystem: fs,
-            roots: [
-                rootPackage
-            ],
-            packages: [
-                swiftSyntax
-            ],
-            prebuiltsManager: .init(
-                httpClient: httpClient,
-                archiver: archiver
-            ),
-            customHostTriple: Triple("86_64-unknown-linux-gnu")
+            httpClient: httpClient,
+            archiver: archiver,
+            swiftSyntaxVersion: "600.0.1",
+            triple: Triple("86_64-unknown-linux-gnu")
         )
 
-        try await workspace.checkPackageGraph(roots: ["Foo"]) { modulesGraph, diagnostics in
+        try await workspace.checkPackageGraph(roots: [rootName]) { modulesGraph, diagnostics in
             XCTAssertTrue(diagnostics.filter({ $0.severity == .error }).isEmpty)
             let rootPackage = try XCTUnwrap(modulesGraph.rootPackages.first)
-            try checkSettings(rootPackage, "FooMacros", usePrebuilt: false)
-            try checkSettings(rootPackage, "FooTests", usePrebuilt: false)
-            try checkSettings(rootPackage, "Foo", usePrebuilt: false)
-            try checkSettings(rootPackage, "FooClient", usePrebuilt: false)
+            try checkSettings(rootPackage, "FooMacros", nil)
+            try checkSettings(rootPackage, "FooTests", nil)
+            try checkSettings(rootPackage, "Foo", nil)
+            try checkSettings(rootPackage, "FooClient", nil)
         }
     }
 
@@ -518,12 +436,9 @@ final class PrebuiltsTests: XCTestCase {
         let sandbox = AbsolutePath("/tmp/ws")
         let fs = InMemoryFileSystem()
 
-        let artifact = Data()
-        let (_, rootPackage, swiftSyntax) = try initData(artifact: artifact, swiftSyntaxVersion: "600.0.1")
-
         let httpClient = HTTPClient { request, progressHandler in
-            if request.url == "https://download.swift.org/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-manifest.json" {
-                // Pretend it's a different swift version
+            if request.url == "https://download.swift.org/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-MacroSupport-macos_aarch64.zip" {
+                // Pretend we're a different swift version
                 return .notFound()
              } else {
                 XCTFail("Unexpected URL \(request.url)")
@@ -536,200 +451,21 @@ final class PrebuiltsTests: XCTestCase {
             completion(.success(()))
         })
 
-        let workspace = try await MockWorkspace(
+        let workspace = try await initWorkspace(
+            fs: fs,
             sandbox: sandbox,
-            fileSystem: fs,
-            roots: [
-                rootPackage
-            ],
-            packages: [
-                swiftSyntax
-            ],
-            prebuiltsManager: .init(
-                httpClient: httpClient,
-                archiver: archiver
-            )
+            httpClient: httpClient,
+            archiver: archiver,
+            swiftSyntaxVersion: "600.0.1"
         )
 
-        try await workspace.checkPackageGraph(roots: ["Foo"]) { modulesGraph, diagnostics in
+        try await workspace.checkPackageGraph(roots: [rootName]) { modulesGraph, diagnostics in
             XCTAssertTrue(diagnostics.filter({ $0.severity == .error }).isEmpty)
             let rootPackage = try XCTUnwrap(modulesGraph.rootPackages.first)
-            try checkSettings(rootPackage, "FooMacros", usePrebuilt: false)
-            try checkSettings(rootPackage, "FooTests", usePrebuilt: false)
-            try checkSettings(rootPackage, "Foo", usePrebuilt: false)
-            try checkSettings(rootPackage, "FooClient", usePrebuilt: false)
-        }
-    }
-
-    func testBadChecksumHttp() async throws {
-        let sandbox = AbsolutePath("/tmp/ws")
-        let fs = InMemoryFileSystem()
-
-        let artifact = Data()
-        let (manifest, rootPackage, swiftSyntax) = try initData(artifact: artifact, swiftSyntaxVersion: "600.0.1")
-        let manifestData = try JSONEncoder().encode(manifest)
-
-        let fakeArtifact = Data([56])
-
-        let httpClient = HTTPClient { request, progressHandler in
-            guard case .download(let fileSystem, let destination) = request.kind else {
-                throw StringError("invalid request \(request.kind)")
-            }
-
-            if request.url == "https://download.swift.org/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-manifest.json" {
-                try fileSystem.writeFileContents(destination, data: manifestData)
-                return .okay()
-            } else if request.url == "https://download.swift.org/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-MacroSupport-macos_aarch64.zip" {
-                try fileSystem.writeFileContents(destination, data: fakeArtifact)
-                return .okay()
-             } else {
-                XCTFail("Unexpected URL \(request.url)")
-                return .notFound()
-            }
-        }
-
-        let archiver = MockArchiver(handler: { _, archivePath, destination, completion in
-            XCTFail("Unexpected call to archiver")
-            completion(.success(()))
-        })
-
-        let workspace = try await MockWorkspace(
-            sandbox: sandbox,
-            fileSystem: fs,
-            roots: [
-                rootPackage
-            ],
-            packages: [
-                swiftSyntax
-            ],
-            prebuiltsManager: .init(
-                httpClient: httpClient,
-                archiver: archiver
-            ),
-            customHostTriple: Triple("arm64-apple-macosx15.0")
-        )
-
-        try await workspace.checkPackageGraph(roots: ["Foo"]) { modulesGraph, diagnostics in
-            XCTAssertTrue(diagnostics.filter({ $0.severity == .error }).isEmpty)
-            let rootPackage = try XCTUnwrap(modulesGraph.rootPackages.first)
-            try checkSettings(rootPackage, "FooMacros", usePrebuilt: false)
-            try checkSettings(rootPackage, "FooTests", usePrebuilt: false)
-            try checkSettings(rootPackage, "Foo", usePrebuilt: false)
-            try checkSettings(rootPackage, "FooClient", usePrebuilt: false)
-        }
-    }
-
-    func testBadChecksumCache() async throws {
-        let sandbox = AbsolutePath("/tmp/ws")
-        let fs = InMemoryFileSystem()
-
-        let artifact = Data()
-        let (manifest, rootPackage, swiftSyntax) = try initData(artifact: artifact, swiftSyntaxVersion: "600.0.1")
-        let manifestData = try JSONEncoder().encode(manifest)
-
-        let fakeArtifact = Data([56])
-        let cacheFile = try AbsolutePath(validating: "/home/user/caches/org.swift.swiftpm/prebuilts/swift-syntax/\(self.swiftVersion)-MacroSupport-macos_aarch64.zip")
-        try fs.writeFileContents(cacheFile, data: fakeArtifact)
-
-        let httpClient = HTTPClient { request, progressHandler in
-            guard case .download(let fileSystem, let destination) = request.kind else {
-                throw StringError("invalid request \(request.kind)")
-            }
-
-            if request.url == "https://download.swift.org/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-manifest.json" {
-                try fileSystem.writeFileContents(destination, data: manifestData)
-                return .okay()
-            } else if request.url == "https://download.swift.org/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-MacroSupport-macos_aarch64.zip" {
-                try fileSystem.writeFileContents(destination, data: artifact)
-                return .okay()
-             } else {
-                XCTFail("Unexpected URL \(request.url)")
-                return .notFound()
-            }
-        }
-
-        let archiver = MockArchiver(handler: { _, archivePath, destination, completion in
-            XCTAssertEqual(archivePath.pathString, "/home/user/caches/org.swift.swiftpm/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-MacroSupport-macos_aarch64.zip".fixwin)
-            XCTAssertEqual(destination.pathString, "/tmp/ws/.build/prebuilts/swift-syntax/\(self.swiftVersion)-MacroSupport-macos_aarch64".fixwin)
-            completion(.success(()))
-        })
-
-        let workspace = try await MockWorkspace(
-            sandbox: sandbox,
-            fileSystem: fs,
-            roots: [
-                rootPackage
-            ],
-            packages: [
-                swiftSyntax
-            ],
-            prebuiltsManager: .init(
-                httpClient: httpClient,
-                archiver: archiver
-            ),
-            customHostTriple: Triple("arm64-apple-macosx15.0")
-        )
-
-        try await workspace.checkPackageGraph(roots: ["Foo"]) { modulesGraph, diagnostics in
-            XCTAssertTrue(diagnostics.filter({ $0.severity == .error }).isEmpty)
-            let rootPackage = try XCTUnwrap(modulesGraph.rootPackages.first)
-            try checkSettings(rootPackage, "FooMacros", usePrebuilt: true)
-            try checkSettings(rootPackage, "FooTests", usePrebuilt: true)
-            try checkSettings(rootPackage, "Foo", usePrebuilt: false)
-            try checkSettings(rootPackage, "FooClient", usePrebuilt: false)
-        }
-    }
-
-    func testBadManifest() async throws {
-        let sandbox = AbsolutePath("/tmp/ws")
-        let fs = InMemoryFileSystem()
-
-        let artifact = Data()
-        let (manifest, rootPackage, swiftSyntax) = try initData(artifact: artifact, swiftSyntaxVersion: "600.0.1")
-        let manifestData = try JSONEncoder().encode(manifest)
-
-        let httpClient = HTTPClient { request, progressHandler in
-            guard case .download(let fileSystem, let destination) = request.kind else {
-                throw StringError("invalid request \(request.kind)")
-            }
-
-            if request.url == "https://download.swift.org/prebuilts/swift-syntax/600.0.1/\(self.swiftVersion)-manifest.json" {
-                let badManifestData = manifestData + Data("bad".utf8)
-                try fileSystem.writeFileContents(destination, data: badManifestData)
-                return .okay()
-             } else {
-                XCTFail("Unexpected URL \(request.url)")
-                return .notFound()
-            }
-        }
-
-        let archiver = MockArchiver(handler: { _, archivePath, destination, completion in
-            XCTFail("Unexpected call to archiver")
-            completion(.success(()))
-        })
-
-        let workspace = try await MockWorkspace(
-            sandbox: sandbox,
-            fileSystem: fs,
-            roots: [
-                rootPackage
-            ],
-            packages: [
-                swiftSyntax
-            ],
-            prebuiltsManager: .init(
-                httpClient: httpClient,
-                archiver: archiver
-            )
-        )
-
-        try await workspace.checkPackageGraph(roots: ["Foo"]) { modulesGraph, diagnostics in
-            XCTAssertTrue(diagnostics.filter({ $0.severity == .error }).isEmpty)
-            let rootPackage = try XCTUnwrap(modulesGraph.rootPackages.first)
-            try checkSettings(rootPackage, "FooMacros", usePrebuilt: false)
-            try checkSettings(rootPackage, "FooTests", usePrebuilt: false)
-            try checkSettings(rootPackage, "Foo", usePrebuilt: false)
-            try checkSettings(rootPackage, "FooClient", usePrebuilt: false)
+            try checkSettings(rootPackage, "FooMacros", nil)
+            try checkSettings(rootPackage, "FooTests", nil)
+            try checkSettings(rootPackage, "Foo", nil)
+            try checkSettings(rootPackage, "FooClient", nil)
         }
     }
 
@@ -737,28 +473,21 @@ final class PrebuiltsTests: XCTestCase {
         let sandbox = AbsolutePath("/tmp/ws")
         let fs = InMemoryFileSystem()
 
-        let artifact = Data()
-        let (_, rootPackage, swiftSyntax) = try initData(artifact: artifact, swiftSyntaxVersion: "600.0.1")
-
-        let workspace = try await MockWorkspace(
+        let workspace = try await initWorkspace(
+            fs: fs,
             sandbox: sandbox,
-            fileSystem: fs,
-            roots: [
-                rootPackage
-            ],
-            packages: [
-                swiftSyntax
-            ],
-            customHostTriple: Triple("arm64-apple-macosx15.0")
+            httpClient: nil,
+            archiver: nil,
+            swiftSyntaxVersion: "600.0.1"
         )
 
         try await workspace.checkPackageGraph(roots: ["Foo"]) { modulesGraph, diagnostics in
             XCTAssertTrue(diagnostics.filter({ $0.severity == .error }).isEmpty)
             let rootPackage = try XCTUnwrap(modulesGraph.rootPackages.first)
-            try checkSettings(rootPackage, "FooMacros", usePrebuilt: false)
-            try checkSettings(rootPackage, "FooTests", usePrebuilt: false)
-            try checkSettings(rootPackage, "Foo", usePrebuilt: false)
-            try checkSettings(rootPackage, "FooClient", usePrebuilt: false)
+            try checkSettings(rootPackage, "FooMacros", nil)
+            try checkSettings(rootPackage, "FooTests", nil)
+            try checkSettings(rootPackage, "Foo", nil)
+            try checkSettings(rootPackage, "FooClient", nil)
         }
     }
 }

@@ -39,107 +39,6 @@ public protocol PrebuiltsManagerDelegate {
 }
 
 extension Workspace {
-    public struct PrebuiltsManifest: Codable {
-        public let version: Int
-        public var libraries: [Library]
-
-        public struct Library: Identifiable, Codable {
-            public let name: String
-            public var products: [String]
-            public var cModules: [String]
-            public var artifacts: [Artifact]
-
-            public var id: String { name }
-
-            public struct Artifact: Identifiable, Codable {
-                public let platform: Platform
-                public let checksum: String
-
-                public var id: Platform { platform }
-
-                public init(platform: Platform, checksum: String) {
-                    self.platform = platform
-                    self.checksum = checksum
-                }
-            }
-
-            public init(
-                name: String,
-                products: [String] = [],
-                cModules: [String] = [],
-                artifacts: [Artifact] = []
-            ) {
-                self.name = name
-                self.products = products
-                self.cModules = cModules
-                self.artifacts = artifacts
-            }
-        }
-
-        public init(libraries: [Library] = []) {
-            self.version = 1
-            self.libraries = libraries
-        }
-
-        public enum Platform: String, Codable, CaseIterable {
-            case macos_aarch64
-            case macos_x86_64
-            case windows_aarch64
-            case windows_x86_64
-            // noble is currently missing
-            case ubuntu_jammy_aarch64
-            case ubuntu_jammy_x86_64
-            case ubuntu_focal_aarch64
-            case ubuntu_focal_x86_64
-            // bookworm is currently missing
-            // fedora39 is currently missing
-            case amazonlinux2_aarch64
-            case amazonlinux2_x86_64
-            case rhel_ubi9_aarch64
-            case rhel_ubi9_x86_64
-
-            public enum Arch: String {
-                case x86_64
-                case aarch64
-            }
-
-            public enum OS {
-                case macos
-                case windows
-                case linux
-            }
-
-            public var arch: Arch {
-                switch self {
-                case .macos_aarch64, .windows_aarch64,
-                    .ubuntu_jammy_aarch64, .ubuntu_focal_aarch64,
-                    .amazonlinux2_aarch64,
-                    .rhel_ubi9_aarch64:
-                    return .aarch64
-                case .macos_x86_64, .windows_x86_64,
-                    .ubuntu_jammy_x86_64, .ubuntu_focal_x86_64,
-                    .amazonlinux2_x86_64,
-                    .rhel_ubi9_x86_64:
-                    return .x86_64
-                }
-            }
-
-            public var os: OS {
-                switch self {
-                case .macos_aarch64, .macos_x86_64:
-                    return .macos
-                case .windows_aarch64, .windows_x86_64:
-                    return .windows
-                case .ubuntu_jammy_aarch64, .ubuntu_jammy_x86_64,
-                    .ubuntu_focal_aarch64, .ubuntu_focal_x86_64,
-                    .amazonlinux2_aarch64, .amazonlinux2_x86_64,
-                    .rhel_ubi9_aarch64, .rhel_ubi9_x86_64:
-                    return .linux
-                }
-            }
-        }
-    }
-
     /// For simplified init in tests
     public struct CustomPrebuiltsManager {
         let httpClient: HTTPClient?
@@ -193,35 +92,10 @@ extension Workspace {
             } else {
                 self.prebuiltsDownloadURL = URL(string: "https://download.swift.org/prebuilts")!
             }
-
-            self.prebuiltPackages = [
-                // TODO: we should have this in a manifest somewhere, not hardcoded like this
-                .init(
-                    identity: .plain("swift-syntax"),
-                    packageRefs: [
-                        .init(
-                            identity: .plain("swift-syntax"),
-                            kind: .remoteSourceControl("https://github.com/swiftlang/swift-syntax.git")
-                        ),
-                        .init(
-                            identity: .plain("swift-syntax"),
-                            kind: .remoteSourceControl("git@github.com:swiftlang/swift-syntax.git")
-                        ),
-                    ],
-                ),
-            ]
         }
-
-        struct PrebuiltPackage {
-            let identity: PackageIdentity
-            let packageRefs: [PackageReference]
-        }
-
-        private let prebuiltPackages: [PrebuiltPackage]
 
         // Version of the compiler we're building against
-        private let swiftVersion =
-            "\(SwiftVersion.current.major).\(SwiftVersion.current.minor)"
+        private let swiftVersion = "\(SwiftVersion.current.major).\(SwiftVersion.current.minor)"
 
         fileprivate func findPrebuilts(packages: [PackageReference]) -> [PrebuiltPackage] {
             var prebuilts: [PrebuiltPackage] = []
@@ -231,7 +105,7 @@ extension Workspace {
                     continue
                 }
 
-                if let prebuilt = prebuiltPackages.first(where: {
+                if let prebuilt = Self.prebuiltPackages.first(where: {
                     $0.packageRefs.contains(where: {
                         guard case let .remoteSourceControl(prebuiltURL) = $0.kind,
                               $0.identity == packageRef.identity else {
@@ -256,241 +130,147 @@ extension Workspace {
             return prebuilts
         }
 
-        func downloadManifest(
-            package: PrebuiltPackage,
-            version: Version,
-            observabilityScope: ObservabilityScope
-        ) async throws -> PrebuiltsManifest? {
-            let manifestFile = swiftVersion + "-manifest.json"
-            let manifestPath = try RelativePath(validating: "\(package.identity)/\(version)/\(manifestFile)")
-            let destination = scratchPath.appending(manifestPath)
-            let cacheDest = cachePath?.appending(manifestPath)
-
-            func loadManifest() throws -> PrebuiltsManifest? {
-                do {
-                    return try JSONDecoder().decode(
-                        path: destination,
-                        fileSystem: fileSystem,
-                        as: PrebuiltsManifest.self
-                    )
-                } catch {
-                    // redownload it
-                    observabilityScope.emit(
-                        info: "Failed to decode prebuilt manifest",
-                        underlyingError: error
-                    )
-                    try fileSystem.removeFileTree(destination)
-                    return nil
-                }
-            }
-
-            if fileSystem.exists(destination), let manifest = try? loadManifest() {
-                return manifest
-            } else if let cacheDest, fileSystem.exists(cacheDest) {
-                // Pull it out of the cache
-                try fileSystem.createDirectory(destination.parentDirectory, recursive: true)
-                try fileSystem.copy(from: cacheDest, to: destination)
-
-                if let manifest = try? loadManifest() {
-                    return manifest
-                }
-            }
-
-            try fileSystem.createDirectory(destination.parentDirectory, recursive: true)
-
-            let manifestURL = self.prebuiltsDownloadURL.appending(
-                components: package.identity.description, version.description, manifestFile
+        func download(
+            url: URL,
+            destination: AbsolutePath,
+            observabilityScope: ObservabilityScope,
+            progressHandler: HTTPClient.ProgressHandler? = nil
+        ) async throws {
+            var headers = HTTPClientHeaders()
+            headers.add(name: "Accept", value: "application/json")
+            var request = HTTPClient.Request.download(
+                url: url,
+                headers: headers,
+                fileSystem: self.fileSystem,
+                destination: destination
             )
+            request.options.authorizationProvider =
+            self.authorizationProvider?.httpAuthorizationHeader(for:)
+            request.options.retryStrategy = .exponentialBackoff(
+                maxAttempts: 3,
+                baseDelay: .milliseconds(50)
+            )
+            request.options.validResponseCodes = [200]
 
-            if manifestURL.scheme == "file" {
-                let sourcePath = try AbsolutePath(validating: manifestURL.path)
-                if fileSystem.exists(sourcePath) {
-                    // simply copy it over
-                    try fileSystem.copy(from: sourcePath, to: destination)
-                    // and cache it
-                    if let cacheDest {
-                        try fileSystem.createDirectory(cacheDest.parentDirectory, recursive: true)
-                        try fileSystem.copy(from: destination, to: cacheDest)
-                    }
-                } else {
-                    return nil
-                }
-            } else {
-                var headers = HTTPClientHeaders()
-                headers.add(name: "Accept", value: "application/json")
-                var request = HTTPClient.Request.download(
-                    url: manifestURL,
-                    headers: headers,
-                    fileSystem: self.fileSystem,
-                    destination: destination
+            do {
+                _ = try await self.httpClient.execute(request, progress: progressHandler)
+            } catch {
+                observabilityScope.emit(
+                    info: "Prebuilt download failed \(url.lastPathComponent)",
+                    underlyingError: error
                 )
-                request.options.authorizationProvider =
-                self.authorizationProvider?.httpAuthorizationHeader(for:)
-                request.options.retryStrategy = .exponentialBackoff(
-                    maxAttempts: 3,
-                    baseDelay: .milliseconds(50)
-                )
-                request.options.validResponseCodes = [200]
-
-                do {
-                    _ = try await self.httpClient.execute(request) { _, _ in
-                        // TODO: send to delegate
-                    }
-                } catch {
-                    observabilityScope.emit(
-                        info: "Prebuilt \(manifestFile)",
-                        underlyingError: error
-                    )
-                    // Create an empty manifest so we don't keep trying to download it
-                    let manifest = PrebuiltsManifest(libraries: [])
-                    try? fileSystem.writeFileContents(destination, data: JSONEncoder().encode(manifest))
-                    return nil
-                }
+                throw error
             }
-
-            if let manifest = try loadManifest() {
-                // Cache the manifest
-                if let cacheDest {
-                    try fileSystem.createDirectory(cacheDest.parentDirectory, recursive: true)
-                    try fileSystem.copy(from: destination, to: cacheDest)
-                }
-                return manifest
-            } else {
-                return nil
-            }
-        }
-
-        func check(path: AbsolutePath, checksum: String) throws -> Bool {
-            let contents = try fileSystem.readFileContents(path)
-            let hash = hashAlgorithm.hash(contents).hexadecimalRepresentation
-            return hash == checksum
         }
 
         func downloadPrebuilt(
             package: PrebuiltPackage,
             version: Version,
-            library: PrebuiltsManifest.Library,
-            artifact: PrebuiltsManifest.Library.Artifact,
+            library: PrebuiltPackage.Library,
+            platform: Platform,
             observabilityScope: ObservabilityScope
         ) async throws -> AbsolutePath? {
-            let artifactName =
-                "\(swiftVersion)-\(library.name)-\(artifact.platform.rawValue)"
-            let scratchDir = scratchPath.appending(
-                package.identity.description
-            )
-            let artifactDir = scratchDir.appending(artifactName)
-            guard !fileSystem.exists(artifactDir) else {
-                return artifactDir
+            let artifactName = "\(swiftVersion)-\(library.name)-\(platform.rawValue)"
+            let scratchDir = scratchPath.appending(components: package.identity.description, version.description)
+
+            // Skip if we have a nozip file from a previous build
+            let noZipFile = scratchDir.appending(artifactName + ".nozip")
+            if fileSystem.exists(noZipFile) {
+                return nil
             }
 
-            let artifactFile = artifactName + ".zip"
-            let prebuiltsDir = cachePath ?? scratchPath
-            let destination = prebuiltsDir.appending(components:
-                package.identity.description,
-                version.description,
-                artifactFile
-            )
+            let artifactDir = scratchDir.appending(artifactName)
 
-            let zipExists = fileSystem.exists(destination)
-            if try (!zipExists || !check(path: destination, checksum: artifact.checksum)) {
-                if zipExists {
-                    observabilityScope.emit(info: "Prebuilt artifact \(artifactFile) checksum mismatch, redownloading.")
-                    try fileSystem.removeFileTree(destination)
-                }
+            if !fileSystem.exists(artifactDir) {
+                // Extract the artifact dir from the zip file
+                let artifactFile = artifactName + ".zip"
 
-                try fileSystem.createDirectory(
-                    destination.parentDirectory,
-                    recursive: true
-                )
-
-                // Download
-                let artifactURL = self.prebuiltsDownloadURL.appending(
+                let scratchFile = scratchPath.appending(
                     components: package.identity.description, version.description, artifactFile
                 )
 
-                let fetchStart = DispatchTime.now()
-                if artifactURL.scheme == "file" {
-                    let artifactPath = try AbsolutePath(validating: artifactURL.path)
-                    if fileSystem.exists(artifactPath) {
-                        try fileSystem.copy(from: artifactPath, to: destination)
-                    } else {
-                        return nil
-                    }
-                } else {
-                    var headers = HTTPClientHeaders()
-                    headers.add(name: "Accept", value: "application/octet-stream")
-                    var request = HTTPClient.Request.download(
-                        url: artifactURL,
-                        headers: headers,
-                        fileSystem: self.fileSystem,
-                        destination: destination
-                    )
-                    request.options.authorizationProvider =
-                    self.authorizationProvider?.httpAuthorizationHeader(for:)
-                    request.options.retryStrategy = .exponentialBackoff(
-                        maxAttempts: 3,
-                        baseDelay: .milliseconds(50)
-                    )
-                    request.options.validResponseCodes = [200]
+                if !fileSystem.exists(scratchFile) {
+                    // Fetch the zip
+                    try fileSystem.createDirectory(scratchFile.parentDirectory, recursive: true)
 
-                    self.delegate?.willDownloadPrebuilt(
-                        from: artifactURL.absoluteString,
-                        fromCache: false
-                    )
-                    do {
-                        _ = try await self.httpClient.execute(request) {
-                            bytesDownloaded,
-                            totalBytesToDownload in
-                            self.delegate?.downloadingPrebuilt(
-                                from: artifactURL.absoluteString,
-                                bytesDownloaded: bytesDownloaded,
-                                totalBytesToDownload: totalBytesToDownload
-                            )
+                    let cacheFile = cachePath?.appending(components: package.identity.description, version.description, artifactFile)
+
+                    if let cacheFile, fileSystem.exists(cacheFile) {
+                        // Get it from the cache
+                        try fileSystem.withLock(on: cacheFile, type: .exclusive) {
+                            try fileSystem.copy(from: cacheFile, to: scratchFile)
                         }
-                    } catch {
-                        observabilityScope.emit(
-                            info: "Prebuilt artifact \(artifactFile)",
-                            underlyingError: error
+                    } else {
+                        // Download it
+                        let artifactURL = self.prebuiltsDownloadURL.appending(
+                            components: package.identity.description, version.description, artifactFile
                         )
+
+                        let fetchStart = DispatchTime.now()
+                        if artifactURL.scheme == "file" {
+                            // Support file for testing
+                            let artifactPath = try AbsolutePath(validating: artifactURL.path)
+                            if fileSystem.exists(artifactPath) {
+                                try fileSystem.copy(from: artifactPath, to: scratchFile)
+                            } else {
+                                return nil
+                            }
+                        } else {
+                            self.delegate?.willDownloadPrebuilt(from: artifactURL.absoluteString, fromCache: false)
+
+                            do {
+                                try await download(url: artifactURL, destination: scratchFile, observabilityScope: observabilityScope) {
+                                    bytesDownloaded, totalBytesToDownload in
+
+                                    self.delegate?.downloadingPrebuilt(
+                                        from: artifactURL.absoluteString,
+                                        bytesDownloaded: bytesDownloaded,
+                                        totalBytesToDownload: totalBytesToDownload
+                                    )
+                                }
+
+                                self.delegate?.didDownloadPrebuilt(
+                                    from: artifactURL.absoluteString,
+                                    result: .success((path: scratchFile, fromCache: false)),
+                                    duration: fetchStart.distance(to: .now())
+                                )
+                            } catch {
+                                self.delegate?.didDownloadPrebuilt(
+                                    from: artifactURL.absoluteString,
+                                    result: .failure(error),
+                                    duration: fetchStart.distance(to: .now())
+                                )
+                                // Create the nozip file so we don't try again until scratch is cleared
+                                try fileSystem.createDirectory(noZipFile.parentDirectory, recursive: true)
+                                try fileSystem.writeFileContents(noZipFile, data: Data())
+                                return nil
+                            }
+                        }
+
                         self.delegate?.didDownloadPrebuilt(
                             from: artifactURL.absoluteString,
-                            result: .failure(error),
+                            result: .success((scratchFile, false)),
                             duration: fetchStart.distance(to: .now())
                         )
-                        return nil
+
+                        if let cacheFile {
+                            // Cache it
+                            try fileSystem.withLock(on: cacheFile, type: .exclusive) {
+                                try fileSystem.createDirectory(cacheFile.parentDirectory, recursive: true)
+                                try fileSystem.copy(from: scratchFile, to: cacheFile)
+                            }
+                        }
                     }
                 }
 
-                // Check the checksum
-                if try !check(path: destination, checksum: artifact.checksum) {
-                    let errorString =
-                        "Prebuilt artifact \(artifactFile) checksum mismatch"
-                    observabilityScope.emit(info: errorString)
-                    self.delegate?.didDownloadPrebuilt(
-                        from: artifactURL.absoluteString,
-                        result: .failure(StringError(errorString)),
-                        duration: fetchStart.distance(to: .now())
-                    )
-                    return nil
-                }
+                // Extract it
+                try fileSystem.createDirectory(artifactDir, recursive: true)
+                try await archiver.extract(from: scratchFile, to: artifactDir)
 
-                self.delegate?.didDownloadPrebuilt(
-                    from: artifactURL.absoluteString,
-                    result: .success((destination, false)),
-                    duration: fetchStart.distance(to: .now())
+                observabilityScope.emit(
+                    info: "Prebuilt artifact \(artifactFile) downloaded"
                 )
             }
-
-            // Extract
-            if fileSystem.exists(artifactDir) {
-                try fileSystem.removeFileTree(artifactDir)
-            }
-            try fileSystem.createDirectory(artifactDir, recursive: true)
-            try await archiver.extract(from: destination, to: artifactDir)
-
-            observabilityScope.emit(
-                info: "Prebuilt artifact \(artifactFile) downloaded"
-            )
 
             return artifactDir
         }
@@ -518,47 +298,34 @@ extension Workspace {
 
         for prebuilt in prebuiltsManager.findPrebuilts(packages: try manifests.requiredPackages) {
             guard
+                let hostPlatform = hostPrebuiltsPlatform,
                 let manifest = manifests.allDependencyManifests[prebuilt.identity],
-                let packageVersion = manifest.manifest.version,
-                let prebuiltManifest = try await prebuiltsManager
-                    .downloadManifest(
-                        package: prebuilt,
-                        version: packageVersion,
-                        observabilityScope: observabilityScope
-                    )
+                let packageVersion = manifest.manifest.version
             else {
                 continue
             }
 
-            let hostPlatform = hostPrebuiltsPlatform
-
-            for library in prebuiltManifest.libraries {
-                for artifact in library.artifacts {
-                    guard artifact.platform == hostPlatform else {
-                        continue
-                    }
-
-                    if let path = try await prebuiltsManager
-                        .downloadPrebuilt(
-                            package: prebuilt,
-                            version: packageVersion,
-                            library: library,
-                            artifact: artifact,
-                            observabilityScope: observabilityScope
-                        )
-                    {   
-                        // Add to workspace state
-                        let managedPrebuilt = ManagedPrebuilt(
-                            identity: prebuilt.identity,
-                            version: packageVersion,
-                            libraryName: library.name,
-                            path: path,
-                            products: library.products,
-                            cModules: library.cModules
-                        )
-                        addedPrebuilts.add(managedPrebuilt)
-                        self.state.prebuilts.add(managedPrebuilt)
-                    }
+            for library in prebuilt.libraries {
+                if let path = try await prebuiltsManager
+                    .downloadPrebuilt(
+                        package: prebuilt,
+                        version: packageVersion,
+                        library: library,
+                        platform: hostPlatform,
+                        observabilityScope: observabilityScope
+                    )
+                {
+                    // Add to workspace state
+                    let managedPrebuilt = ManagedPrebuilt(
+                        identity: prebuilt.identity,
+                        version: packageVersion,
+                        libraryName: library.name,
+                        path: path,
+                        products: library.products,
+                        cModules: library.cModules
+                    )
+                    addedPrebuilts.add(managedPrebuilt)
+                    self.state.prebuilts.add(managedPrebuilt)
                 }
             }
         }
@@ -571,8 +338,136 @@ extension Workspace {
 
         try self.state.save()
     }
+}
 
-    var hostPrebuiltsPlatform: PrebuiltsManifest.Platform? {
+extension Workspace.PrebuiltsManager {
+    public struct PrebuiltPackage {
+        let identity: PackageIdentity
+        let packageRefs: [PackageReference]
+        public var libraries: [Library]
+        
+        public struct Library: Identifiable {
+            public let name: String
+            public var products: [String]
+            public var cModules: [String]
+
+            public var id: String { name }
+            
+            public init(
+                name: String,
+                products: [String] = [],
+                cModules: [String] = []
+            ) {
+                self.name = name
+                self.products = products
+                self.cModules = cModules
+            }
+        }
+    }
+    
+    static public let prebuiltPackages: [PrebuiltPackage] = [
+        // TODO: we should have this in a manifest somewhere, not hardcoded like this
+        .init(
+            identity: .plain("swift-syntax"),
+            packageRefs: [
+                .init(
+                    identity: .plain("swift-syntax"),
+                    kind: .remoteSourceControl("https://github.com/swiftlang/swift-syntax.git")
+                ),
+                .init(
+                    identity: .plain("swift-syntax"),
+                    kind: .remoteSourceControl("git@github.com:swiftlang/swift-syntax.git")
+                ),
+            ],
+            libraries: [
+                .init(
+                    name: "MacroSupport",
+                    products: [
+                        "SwiftBasicFormat",
+                        "SwiftCompilerPlugin",
+                        "SwiftDiagnostics",
+                        "SwiftIDEUtils",
+                        "SwiftOperators",
+                        "SwiftParser",
+                        "SwiftParserDiagnostics",
+                        "SwiftRefactor",
+                        "SwiftSyntax",
+                        "SwiftSyntaxMacros",
+                        "SwiftSyntaxMacroExpansion",
+                        "SwiftSyntaxMacrosTestSupport",
+                        "SwiftSyntaxMacrosGenericTestSupport",
+                    ],
+                    cModules: [
+                        "_SwiftSyntaxCShims",
+                    ]
+                ),
+            ]
+        ),
+    ]
+
+    public enum Platform: String, Codable, CaseIterable {
+        case macos_aarch64
+        case macos_x86_64
+        case windows_aarch64
+        case windows_x86_64
+        // noble is currently missing
+        case ubuntu_jammy_aarch64
+        case ubuntu_jammy_x86_64
+        case ubuntu_focal_aarch64
+        case ubuntu_focal_x86_64
+        // bookworm is currently missing
+        // fedora39 is currently missing
+        case amazonlinux2_aarch64
+        case amazonlinux2_x86_64
+        case rhel_ubi9_aarch64
+        case rhel_ubi9_x86_64
+
+        public enum Arch: String {
+            case x86_64
+            case aarch64
+        }
+
+        public enum OS {
+            case macos
+            case windows
+            case linux
+        }
+
+        public var arch: Arch {
+            switch self {
+            case .macos_aarch64, .windows_aarch64,
+                    .ubuntu_jammy_aarch64, .ubuntu_focal_aarch64,
+                    .amazonlinux2_aarch64,
+                    .rhel_ubi9_aarch64:
+                return .aarch64
+            case .macos_x86_64, .windows_x86_64,
+                    .ubuntu_jammy_x86_64, .ubuntu_focal_x86_64,
+                    .amazonlinux2_x86_64,
+                    .rhel_ubi9_x86_64:
+                return .x86_64
+            }
+        }
+
+        public var os: OS {
+            switch self {
+            case .macos_aarch64, .macos_x86_64:
+                return .macos
+            case .windows_aarch64, .windows_x86_64:
+                return .windows
+            case .ubuntu_jammy_aarch64, .ubuntu_jammy_x86_64,
+                    .ubuntu_focal_aarch64, .ubuntu_focal_x86_64,
+                    .amazonlinux2_aarch64, .amazonlinux2_x86_64,
+                    .rhel_ubi9_aarch64, .rhel_ubi9_x86_64:
+                return .linux
+            }
+        }
+    }
+
+}
+
+extension Workspace {
+    /// Calculate host prebuilts platform based on host toolchain and underylying environment
+    var hostPrebuiltsPlatform: PrebuiltsManager.Platform? {
         if self.hostToolchain.targetTriple.isDarwin() {
             switch self.hostToolchain.targetTriple.arch {
             case .aarch64:
@@ -666,5 +561,4 @@ extension Workspace {
             return nil
         }
     }
-
 }
