@@ -181,6 +181,25 @@ extension ModulesGraph {
                 let package = try builder.construct()
                 manifestToPackage[manifest] = package
 
+                // Create packages for externals
+                for external in manifest.externals {
+                    let builder = PackageBuilder(
+                        identity: external.packageIdentity,
+                        manifest: external,
+                        parentPackage: package,
+                        productFilter: node.productFilter,
+                        path: external.path,
+                        additionalFileRules: additionalFileRules,
+                        binaryArtifacts: [:],
+                        fileSystem: fileSystem,
+                        observabilityScope: nodeObservabilityScope,
+                        enabledTraits: enabledTraits // TODO: traits for externals?
+                    )
+
+                    let package = try builder.construct()
+                    manifestToPackage[external] = package
+                }
+
                 // Throw if any of the non-root package is empty.
                 if package.modules.isEmpty // System packages have modules in the package but not the manifest.
                     && package.manifest.targets
@@ -349,10 +368,12 @@ private func findAllTransitiveDependencies(
     dependency: CanonicalPackageLocation,
     graph: [ResolvedPackageBuilder]
 ) throws -> [[CanonicalPackageLocation]] {
+    let graph = graph.filter({ $0.package.identity.type == .swift })
     let edges = try Dictionary(uniqueKeysWithValues: graph.map { try (
         $0.package.manifest.canonicalPackageLocation,
         Set(
             $0.package.manifest.dependenciesRequired(for: $0.productFilter, $0.enabledTraits)
+                .filter({ $0.identity.type == .swift })
                 .map(\.packageRef.canonicalLocation)
         )
     ) })
@@ -410,6 +431,25 @@ private func createResolvedPackages(
         )
     }
 
+    // Create package builders for external packages
+    packageBuilders.append(contentsOf: packageBuilders.flatMap { parent in
+        parent.package.manifest.externals.compactMap { external in
+            guard let package = manifestToPackage[external] else {
+                return nil
+            }
+
+            return ResolvedPackageBuilder(
+                package,
+                productFilter: parent.productFilter,
+                enabledTraits: parent.enabledTraits, // TODO: traits for external?
+                isAllowedToVendUnsafeProducts: true,
+                allowedToOverride: false,
+                platformVersionProvider: parent.platformVersionProvider,
+                parentPackage: parent
+            )
+        }
+    })
+
     // Create a map of package builders keyed by the package identity.
     // This is guaranteed to be unique so we can use spm_createDictionary
     let packagesByIdentity: [PackageIdentity: ResolvedPackageBuilder] = packageBuilders.spm_createDictionary {
@@ -459,9 +499,9 @@ private func createResolvedPackages(
 
                 // check if the resolved package location is the same as the dependency one
                 // if not, this means that the dependencies share the same identity
-                // which only allowed when overriding
-                if resolvedPackage.package.manifest.canonicalPackageLocation != dependencyPackageRef
-                    .canonicalLocation && !resolvedPackage.allowedToOverride
+                // which only allowed when overriding. Manifests for non-swift packages don't have a location.
+                if resolvedPackage.package.manifest.canonicalPackageLocation != dependencyPackageRef.canonicalLocation
+                    && !resolvedPackage.allowedToOverride && resolvedPackage.package.identity.type == .swift
                 {
                     let rootPackages = packageBuilders.filter { $0.allowedToOverride == true }
                     let dependenciesPaths = try rootPackages.map { try findAllTransitiveDependencies(
@@ -599,7 +639,13 @@ private func createResolvedPackages(
                 switch dependency {
                 case .module(let moduleDependency, let conditions):
                     try moduleBuilder.module.validateDependency(module: moduleDependency)
-                    guard let dependencyBuilder = modulesMap[moduleDependency] else {
+                    let dependencyBuilder: ResolvedModuleBuilder?
+                    if let parentPackage = packageBuilder.parentPackage {
+                        dependencyBuilder = parentPackage.modules.first(where: { $0.module == moduleDependency })
+                    } else {
+                        dependencyBuilder = modulesMap[moduleDependency]
+                    }
+                    guard let dependencyBuilder else {
                         throw InternalError("unknown target \(moduleDependency.name)")
                     }
                     if moduleBuilder.module.type == .test && dependencyBuilder.module.type == .test
@@ -686,7 +732,7 @@ private func createResolvedPackages(
 
         let packageDoesNotSupportProductAliases = packageBuilder.package.doesNotSupportProductAliases
         let lookupByProductIDs = !packageDoesNotSupportProductAliases &&
-            (packageBuilder.package.manifest.disambiguateByProductIDs || moduleAliasingUsed)
+        (packageBuilder.package.manifest.disambiguateByProductIDs || moduleAliasingUsed)
 
         // Get all the products from dependencies of this package.
         let productDependencies = packageBuilder.dependencies
@@ -707,7 +753,7 @@ private func createResolvedPackages(
             try Dictionary(uniqueKeysWithValues: productDependencies.map {
                 guard let packageName = packageBuilder
                     .dependencyNamesForModuleDependencyResolutionOnly[$0.packageBuilder.package.identity]
-                else {
+                        else {
                     throw InternalError(
                         "could not determine name for dependency on package '\($0.packageBuilder.package.identity)' from package '\(packageBuilder.package.identity)'"
                     )
@@ -740,7 +786,7 @@ private func createResolvedPackages(
                 // Find the product in this package's dependency products.
                 // Look it up by ID if module aliasing is used, otherwise by name.
                 let product = lookupByProductIDs ? productDependencyMap[productRef.identity] :
-                    productDependencyMap[productRef.name]
+                productDependencyMap[productRef.name]
                 guard let product else {
                     // Only emit a diagnostic if there are no other diagnostics.
                     // This avoids flooding the diagnostics with product not
@@ -1246,7 +1292,7 @@ private class DuplicateProductsChecker {
             let useProductIDs = pkgBuilder.package.manifest.disambiguateByProductIDs || lookupByProductIDs
             let depProductRefs = pkgBuilder.package.modules.map(\.dependencies).flatMap { $0 }.compactMap(\.product)
             for depRef in depProductRefs {
-                if let depPkg = depRef.package.map(PackageIdentity.plain) {
+                if let depPkg = depRef.package.map({ PackageIdentity.plain($0) }) {
                     if !self.checkedPkgIDs.contains(depPkg) {
                         self.checkedPkgIDs.append(depPkg)
                     }
@@ -1590,6 +1636,9 @@ private final class ResolvedPackageBuilder: ResolvedBuilder<ResolvedPackage> {
     /// The dependencies of this package.
     var dependencies: [ResolvedPackageBuilder] = []
 
+    /// For an external package, the parent package
+    var parentPackage: ResolvedPackageBuilder?
+
     /// The prebuilt libraries for this package
     var prebuilts: [String: PrebuiltLibrary]?
 
@@ -1616,7 +1665,8 @@ private final class ResolvedPackageBuilder: ResolvedBuilder<ResolvedPackage> {
         isAllowedToVendUnsafeProducts: Bool,
         allowedToOverride: Bool,
         platformVersionProvider: PlatformVersionProvider,
-        prebuilts: [String: PrebuiltLibrary]?
+        prebuilts: [String: PrebuiltLibrary]? = [:],
+        parentPackage: ResolvedPackageBuilder? = nil
     ) {
         self.package = package
         self.productFilter = productFilter
@@ -1625,6 +1675,7 @@ private final class ResolvedPackageBuilder: ResolvedBuilder<ResolvedPackage> {
         self.allowedToOverride = allowedToOverride
         self.platformVersionProvider = platformVersionProvider
         self.prebuilts = prebuilts
+        self.parentPackage = parentPackage
     }
 
     override func constructImpl() throws -> ResolvedPackage {

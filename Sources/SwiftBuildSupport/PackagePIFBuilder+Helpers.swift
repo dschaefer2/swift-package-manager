@@ -134,6 +134,22 @@ extension PackageGraph.ResolvedProduct {
     }
 }
 
+extension PackageModel.Package {
+    var pifTargetGUID: GUID { pifTargetGUID(suffix: nil) }
+
+    func pifTargetGUID(suffix: TargetSuffix?) -> GUID {
+        PackagePIFBuilder.targetGUID(forPackageName: self.name, suffix: suffix)
+    }
+}
+
+extension PackageGraph.ResolvedPackage {
+    var pifTargetGUID: GUID { pifTargetGUID(suffix: nil) }
+
+    func pifTargetGUID(suffix: TargetSuffix?) -> GUID {
+        self.underlying.pifTargetGUID(suffix: suffix)
+    }
+}
+
 extension PackagePIFBuilder {
     /// Helper function to consistently generate a PIF target identifier string for a module in a package.
     ///
@@ -151,6 +167,11 @@ extension PackagePIFBuilder {
     public static func targetGUID(forProductName name: String, withId id: String, suffix: TargetSuffix? = nil) -> GUID {
         let suffixDescription: String = suffix.uniqueDescription(forName: name)
         return "PACKAGE-PRODUCT:\(id).\(name)\(suffixDescription)"
+    }
+
+    public static func targetGUID(forPackageName name: String, suffix: TargetSuffix? = nil) -> GUID {
+        let suffixDescription: String = suffix.uniqueDescription(forName: name)
+        return "PACKAGE-PLUGIN:\(name)\(suffixDescription)"
     }
 
     /// Helper function to consistently generate a target name string for a product in a package.
@@ -257,7 +278,7 @@ extension PackageModel.Module {
         switch self.type {
         case .executable, .snippet:
             true
-        case .library, .test, .macro, .systemModule, .plugin, .binary:
+        case .library, .test, .macro, .systemModule, .plugin, .binary, .externalLibrary:
             false
         }
     }
@@ -266,7 +287,16 @@ extension PackageModel.Module {
         switch self.type {
         case .binary:
             true
-        case .library, .executable, .snippet, .test, .plugin, .macro, .systemModule:
+        case .library, .executable, .snippet, .test, .plugin, .macro, .systemModule, .externalLibrary:
+            false
+        }
+    }
+
+    var isExternalLibrary: Bool {
+        switch self.type {
+        case .externalLibrary:
+            true
+        case .library, .executable, .snippet, .test, .plugin, .macro, .systemModule, .binary:
             false
         }
     }
@@ -276,7 +306,7 @@ extension PackageModel.Module {
         switch self.type {
         case .library, .executable, .snippet, .test, .macro:
             true
-        case .systemModule, .plugin, .binary:
+        case .systemModule, .plugin, .binary, .externalLibrary:
             false
         }
     }
@@ -427,6 +457,7 @@ extension PackageGraph.ResolvedPackage {
 extension PackageGraph.ResolvedModule {
     var isExecutable: Bool { self.underlying.isExecutable }
     var isBinary: Bool { self.underlying.isBinary }
+    var isExternalLibrary: Bool { self.underlying.isExternalLibrary }
     var isSourceModule: Bool { self.underlying.isSourceModule }
 
     /// The path of the module.
@@ -717,7 +748,11 @@ extension PackageGraph.ResolvedModule {
     /// Collect the build settings defined in the package manifest.
     /// Some of them apply *only* to the target itself, while others are also imparted to clients.
     /// Note that the platform is *optional*; unconditional settings have no platform condition.
-    func computeAllBuildSettings(observabilityScope: ObservabilityScope, forRemotePackage: Bool) -> AllBuildSettings {
+    func computeAllBuildSettings(
+        observabilityScope: ObservabilityScope,
+        packagePath: AbsolutePath,
+        forRemotePackage: Bool
+    ) -> AllBuildSettings {
         var allSettings = AllBuildSettings()
 
         for (declaration, settingsAssigments) in self.underlying.buildSettings.assignments.sorted(by: { $0.key < $1.key }) {
@@ -737,10 +772,11 @@ extension PackageGraph.ResolvedModule {
                     singleValueSetting = nil
                     multipleValueSetting = .OTHER_LDFLAGS
                     values = settingAssignment.values.map { "-l\($0)" }
-                case .HEADER_SEARCH_PATHS:
+                case .HEADER_SEARCH_PATHS, .PUBLIC_HEADER_PATHS:
                     singleValueSetting = nil
                     multipleValueSetting = .HEADER_SEARCH_PATHS
-                    values = settingAssignment.values.map { self.sourceDirAbsolutePath.pathString + "/" + $0 }
+                    let root = self.type == .externalLibrary ? packagePath : sourceDirAbsolutePath
+                    values = settingAssignment.values.map { root.appending($0).pathString }
                 case .PREBUILT_INCLUDE_PATHS:
                     singleValueSetting = nil
                     multipleValueSetting = .OTHER_SWIFT_FLAGS
@@ -800,7 +836,8 @@ extension PackageGraph.ResolvedModule {
                     // TODO: Doing that for the PREBUILT_LIBRARIES was causing duplicate library warnings.
                     if let multipleValueSetting = multipleValueSetting,
                         declaration != .PREBUILT_LIBRARIES,
-                        (multipleValueSetting == .OTHER_LDFLAGS || declaration == .PREBUILT_INCLUDE_PATHS) {
+                       (multipleValueSetting == .OTHER_LDFLAGS || declaration == .PREBUILT_INCLUDE_PATHS || declaration == .PUBLIC_HEADER_PATHS)
+                    {
                         allSettings.impartedMultipleValueSettings[pifPlatform, default: [:]][multipleValueSetting, default: []].append(contentsOf: values)
                     }
 
@@ -1053,7 +1090,7 @@ extension Collection<PackageGraph.ResolvedModule> {
 
                 // We need to visit any binary modules to be able to add direct references to them to any client targets.
                 // This is needed so that XCFramework processing always happens *prior* to building any client targets.
-                for moduleDependency in productDependency.modules where moduleDependency.isBinary {
+                for moduleDependency in productDependency.modules where moduleDependency.isBinary || moduleDependency.isExternalLibrary {
                     if moduleIDsSeen.contains(moduleDependency.id) { continue }
                     block(.module(moduleDependency, conditions: conditions))
                 }
@@ -1441,3 +1478,12 @@ extension UserDefaults {
     }
 }
 
+extension PluginModule {
+    func outputDirectory(pluginWorkingDirectory: AbsolutePath, package: ResolvedPackage) -> AbsolutePath {
+        pluginWorkingDirectory.appending(components: [
+            "packages",
+            package.identity.description,
+            self.name
+        ])
+    }
+}

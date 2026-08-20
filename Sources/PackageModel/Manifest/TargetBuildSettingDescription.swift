@@ -45,6 +45,7 @@ public enum TargetBuildSettingDescription {
     /// The kind of the build setting, with associate configuration
     public enum Kind: Codable, Hashable, Sendable {
         case headerSearchPath(String)
+        case publicHeaderPath(String)
         case define(String)
         case linkedLibrary(String)
         case linkedFramework(String)
@@ -76,7 +77,7 @@ public enum TargetBuildSettingDescription {
             case .headerSearchPath, .define, .linkedLibrary, .linkedFramework, .interoperabilityMode,
                  .enableUpcomingFeature, .enableExperimentalFeature, .strictMemorySafety, .swiftLanguageMode,
                  .treatAllWarnings, .treatWarning, .enableWarning, .disableWarning, .defaultIsolation,
-                 .bridgingHeader:
+                 .bridgingHeader, .publicHeaderPath:
                 return false
             }
         }
