@@ -160,10 +160,15 @@ extension ModuleError: CustomStringConvertible {
         case .invalidBridgingHeaderPath(let target, let path):
             return "invalid bridging header '\(path)' in target '\(target)'; the bridging header should not be outside the package root"
         case .bridgingHeaderInPublicHeadersDirectory(let target, let path):
+            return "invalid bridging header '\(path)' in target '\(target)'; the bridging header must not be inside the target's public headers directory"
         case .publicBridgingHeaderInLibraryTarget(let target):
             return "library target '\(target)' cannot use a bridging header with '.public' visibility; only '.internal' visibility is supported in libraries"
         case .multipleBridgingHeaders(let target):
             return "target '\(target)' has more than one bridging header specified"
+        case .defaultLocalizationNotSet:
+            return "manifest property 'defaultLocalization' not set; it is required in the presence of localized resources"
+        case .pluginCapabilityNotDeclared(let target):
+            return "plugin target '\(target)' doesn't have a 'capability' property"
         case .embedInCodeNotSupported(let target):
             return "embedding resources in code not supported for C-family language target \(target)"
         case .artifactBundleAsNormalTarget(let target):

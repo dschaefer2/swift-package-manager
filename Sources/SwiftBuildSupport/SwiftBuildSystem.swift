@@ -472,10 +472,11 @@ public final class SwiftBuildSystem: SPMBuildCore.BuildSystem {
             )
         }
 
+        /* The invocation compiles them, why are we doing it here?
         guard try await self.compilePlugins(in: subset) else {
             result.serializedDiagnosticPathsByTargetName = .failure(StringError("Plugin compilation failed"))
             return result
-        }
+        }*/
 
         try await writePIF(buildParameters: self.buildParameters)
 

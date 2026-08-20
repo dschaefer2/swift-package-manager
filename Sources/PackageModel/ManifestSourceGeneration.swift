@@ -436,6 +436,8 @@ fileprivate extension SourceCodeFragment {
             self.init(enum: "testTarget", subnodes: params, multiline: true)
         case .system:
             self.init(enum: "systemLibrary", subnodes: params, multiline: true)
+        case .externalLibrary:
+            self.init(enum: "externalLibrary", subnodes: params, multiline: true)
         case .binary:
             self.init(enum: "binaryTarget", subnodes: params, multiline: true)
         case .plugin:
@@ -585,6 +587,8 @@ fileprivate extension SourceCodeFragment {
         switch capability {
         case .buildTool:
             self.init(enum: "buildTool", subnodes: [])
+        case .externalBuilder:
+            self.init(enum: "externalBuilder", subnodes: [])
         case .command(let intent, let permissions):
             var params: [SourceCodeFragment] = []
             params.append(SourceCodeFragment(key: "intent", subnode: .init(from: intent)))
@@ -646,7 +650,7 @@ fileprivate extension SourceCodeFragment {
         var params: [SourceCodeFragment] = []
 
         switch setting.kind {
-        case .headerSearchPath(let value), .linkedLibrary(let value), .linkedFramework(let value), .enableUpcomingFeature(let value), .enableExperimentalFeature(let value):
+        case .headerSearchPath(let value), .publicHeaderPath(let value), .linkedLibrary(let value), .linkedFramework(let value), .enableUpcomingFeature(let value), .enableExperimentalFeature(let value):
             params.append(SourceCodeFragment(string: value))
             if let condition = setting.condition {
                 params.append(SourceCodeFragment(from: condition))
@@ -1183,6 +1187,8 @@ extension TargetBuildSettingDescription.Kind {
         switch self {
         case .headerSearchPath:
             return "headerSearchPath"
+        case .publicHeaderPath:
+            return "publicHeaderPath"
         case .define:
             return "define"
         case .linkedLibrary:
