@@ -566,7 +566,7 @@ public struct TargetSourcesBuilder {
 
             switch rule {
             case .compile:
-                if absPath.extension == "swift" {
+                if absPath.extension == "swift" || toolsVersion >= .v6_5 {
                     files.sources.append(absPath)
                 } else if toolsVersion.experimentalCGen {
                     if module is ClangModule {
@@ -584,7 +584,9 @@ public struct TargetSourcesBuilder {
                     // If this is reached, `TargetSourcesBuilder` already emitted a diagnostic, so we can ignore this case here.
                 }
             case .header:
-                if toolsVersion.experimentalCGen {
+                if toolsVersion >= .v6_5 {
+                    files.headers.append(absPath)
+                } else if toolsVersion.experimentalCGen {
                     if module is ClangModule {
                         files.headers.append(absPath)
                     } else {
@@ -594,7 +596,9 @@ public struct TargetSourcesBuilder {
                     observabilityScope.emit(warning: "C header file generation not enabled: \(absPath)")
                 }
             case .modulemap:
-                if toolsVersion.experimentalCGen {
+                if toolsVersion >= .v6_5 {
+                    files.moduleMaps.append(absPath)
+                } else if toolsVersion.experimentalCGen {
                     if module is ClangModule {
                         files.moduleMaps.append(absPath)
                     } else {
@@ -604,7 +608,9 @@ public struct TargetSourcesBuilder {
                     observabilityScope.emit(warning: "Module map generation not enabled: \(absPath)")
                 }
             case .apinotes:
-                if toolsVersion.experimentalCGen {
+                if toolsVersion >= .v6_5 {
+                    files.apiNotes.append(absPath)
+                } else if toolsVersion.experimentalCGen {
                     if module is ClangModule {
                         files.apiNotes.append(absPath)
                     } else {
