@@ -166,38 +166,11 @@ package final class SwiftBuildSystemPlanningOperationDelegate: SWBPlanningOperat
         }
 
         if identity == "-" {
-            let getTaskAllowEntitlementKey: String
-            let applicationIdentifierEntitlementKey: String
-
-            if provisioningSourceData.sdkRoot.contains("macos") || provisioningSourceData.sdkRoot
-                .contains("simulator")
-            {
-                getTaskAllowEntitlementKey = "com.apple.security.get-task-allow"
-                applicationIdentifierEntitlementKey = "com.apple.application-identifier"
-            } else {
-                getTaskAllowEntitlementKey = "get-task-allow"
-                applicationIdentifierEntitlementKey = "application-identifier"
-            }
-
-            let signedEntitlements = provisioningSourceData
-                .entitlementsDestination == "Signature" ? provisioningSourceData.productTypeEntitlements.merging(
-                    [applicationIdentifierEntitlementKey: .plString(provisioningSourceData.bundleIdentifier)],
-                    uniquingKeysWith: { _, new in new }
-                ).merging(provisioningSourceData.projectEntitlements ?? [:], uniquingKeysWith: { _, new in new })
-                : [:]
-
-            let simulatedEntitlements = provisioningSourceData.entitlementsDestination == "__entitlements"
-                ? provisioningSourceData.productTypeEntitlements.merging(
-                    ["application-identifier": .plString(provisioningSourceData.bundleIdentifier)],
-                    uniquingKeysWith: { _, new in new }
-                ).merging(provisioningSourceData.projectEntitlements ?? [:], uniquingKeysWith: { _, new in new })
-                : [:]
-
-            var additionalEntitlements: [String: SWBPropertyListItem] = [:]
-
-            if shouldEnableDebuggingEntitlement {
-                additionalEntitlements[getTaskAllowEntitlementKey] = .plBool(true)
-            }
+            let (signedEntitlements, simulatedEntitlements) = Self.adHocSignedEntitlements(
+                sdkRoot: provisioningSourceData.sdkRoot,
+                entitlementsDestination: provisioningSourceData.entitlementsDestination,
+                shouldEnableDebuggingEntitlement: self.shouldEnableDebuggingEntitlement
+            )
 
             return SWBProvisioningTaskInputs(
                 identityHash: "-",
@@ -206,10 +179,7 @@ package final class SwiftBuildSystemPlanningOperationDelegate: SWBPlanningOperat
                 profileUUID: nil,
                 profilePath: nil,
                 designatedRequirements: nil,
-                signedEntitlements: signedEntitlements.merging(
-                    additionalEntitlements,
-                    uniquingKeysWith: { _, new in new }
-                ),
+                signedEntitlements: signedEntitlements,
                 simulatedEntitlements: simulatedEntitlements,
                 appIdentifierPrefix: nil,
                 teamIdentifierPrefix: nil,
@@ -230,6 +200,27 @@ package final class SwiftBuildSystemPlanningOperationDelegate: SWBPlanningOperat
                 ]
             )
         }
+    }
+
+    package static func adHocSignedEntitlements(
+        sdkRoot: String,
+        entitlementsDestination: String,
+        shouldEnableDebuggingEntitlement: Bool
+    ) -> (signed: [String: SWBPropertyListItem], simulated: [String: SWBPropertyListItem]) {
+        let getTaskAllowEntitlementKey = if sdkRoot.contains("macos") || sdkRoot.contains("simulator") {
+            "com.apple.security.get-task-allow"
+        } else {
+            "get-task-allow"
+        }
+
+        var entitlements: [String: SWBPropertyListItem] = [:]
+        if shouldEnableDebuggingEntitlement {
+            entitlements[getTaskAllowEntitlementKey] = .plBool(true)
+        }
+
+        let signed = entitlementsDestination == "Signature" ? entitlements : [:]
+        let simulated = entitlementsDestination == "__entitlements" ? entitlements : [:]
+        return (signed, simulated)
     }
 
     public func executeExternalTool(
@@ -663,7 +654,7 @@ public final class SwiftBuildSystem: SPMBuildCore.BuildSystem {
 
             do {
                 try await withSession(service: service, name: self.buildParameters.pifManifest.pathString, toolchain: self.buildParameters.toolchain, packageManagerResourcesDirectory: self.packageManagerResourcesDirectory) { session, _ in
-                    self.outputStream.send("Building for \(self.buildParameters.configuration == .debug ? "debugging" : "production")...\n")
+                    self.outputStream.send("Building for \(self.buildParameters.configuration.buildFor)...\n")
 
                     // Load the workspace, and set the system information to the default
                     do {
@@ -901,18 +892,18 @@ public final class SwiftBuildSystem: SPMBuildCore.BuildSystem {
         var settings: [String: String] = [:]
 
         if setToolchainSetting {
-            // If the SwiftPM toolchain corresponds to a toolchain registered with the lower level build system, add it to the toolchain stack.
-            // Otherwise, apply overrides for each component of the SwiftPM toolchain.
-            let toolchainID = try await session.lookupToolchain(at: buildParameters.toolchain.toolchainDir.pathString)
-            if toolchainID == nil {
-                // FIXME: This list of overrides is incomplete.
-                // An error with determining the override should not be fatal here.
-                settings["CC"] = try? buildParameters.toolchain.getClangCompiler().pathStringWithPosixSlashes
-                // Always specify the path of the effective Swift compiler, which was determined in the same way as for the
-                // native build system.
-                settings["SWIFT_EXEC"] = buildParameters.toolchain.swiftCompilerPath.pathStringWithPosixSlashes
-            }
+            // Set the effective compilers unconditionally so a local toolchain / SWIFT_EXEC override is honoured.
+            //
+            // FIXME: This list of overrides is incomplete.
+            // An error with determining the override should not be fatal here.
+            settings["CC"] = try? buildParameters.toolchain.getClangCompiler().pathStringWithPosixSlashes
+            // Always specify the path of the effective Swift compiler, which was determined in the same way as for the
+            // native build system.
+            settings["SWIFT_EXEC"] = buildParameters.toolchain.swiftCompilerPath.pathStringWithPosixSlashes
 
+            // If the SwiftPM toolchain also corresponds to a toolchain registered with the lower level build system,
+            // add it to the toolchain stack so component lookup stays aligned with the pinned compiler.
+            let toolchainID = try await session.lookupToolchain(at: buildParameters.toolchain.toolchainDir.pathString)
             let overrideToolchains = [buildParameters.toolchain.metalToolchainId, toolchainID?.rawValue].compactMap { $0 }
             if !overrideToolchains.isEmpty {
                 settings["TOOLCHAINS"] = (overrideToolchains + ["$(inherited)"]).joined(separator: " ")
@@ -1177,13 +1168,14 @@ public final class SwiftBuildSystem: SPMBuildCore.BuildSystem {
 
     private static func constructExtraToolFlagsSettingsOverrides(from buildParameters: BuildParameters, verbosityFlags: [String]) -> [String: String] {
         var settings: [String: String] = [:]
-        var swiftCompilerFlags = buildParameters.toolchain.extraFlags.swiftCompilerFlags + buildParameters.flags.swiftCompilerFlags
+        var swiftCompilerFlags = WarningControlFlags.filterSwiftWarningControlFlags(buildParameters.toolchain.extraFlags.swiftCompilerFlags + buildParameters.flags.swiftCompilerFlags, value: \.value)
         swiftCompilerFlags += buildParameters.toolchain.extraFlags.cCompilerFlags.asSwiftcCCompilerFlags()
         // User arguments (from -Xcc) should follow generated arguments to allow user overrides
         swiftCompilerFlags += buildParameters.flags.cCompilerFlags.asSwiftcCCompilerFlags()
-        // We strip warning control flags (-warnings-as-errors) from the user supplied swift compiler flags.
-        // Per-package toggling of this flag is handled with  SWIFT_TREAT_WARNINGS_AS_ERRORS in the PIF.
-        swiftCompilerFlags = swiftCompilerFlags.filter { !WarningControlFlags.containsWarningsAsErrors([$0.value]) }
+        // We filter out the warning control flags from the user supplied swift compiler flags. If we don't, these global
+        // flags would be inherited by dependent targets, which are compiled with -suppress-warnings, and the
+        // driver rejects that combination (errors with "conflicting options '-Wwarning' and '-suppress-warnings'").
+        // Applying these flags to local targets is handled for individual packages in the PIF.
         // TODO: Pass -Xcxx flags to swiftc (#6491)
         // Uncomment when downstream support arrives.
         // swiftCompilerFlags += buildParameters.toolchain.extraFlags.cxxCompilerFlags.rawFlags.asSwiftcCXXCompilerFlags()
@@ -1398,8 +1390,9 @@ public final class SwiftBuildSystem: SPMBuildCore.BuildSystem {
                     additionalFileRules: additionalFileRules,
                     addLocalRpaths: self.buildParameters.linkingParameters.shouldDisableLocalRpath ? .never : .always,
                     materializeStaticArchiveProductsForRootPackages: materializeStaticArchiveProductsForRootPackages,
-                    createDynamicVariantsForLibraryProducts: false,
-                    hostBuildProductsPath: try await self.buildProductsPath(for: self.hostBuildParameters)
+                    createDynamicVariantsForLibraryProducts: true,
+                    hostBuildProductsPath: try await self.buildProductsPath(for: self.hostBuildParameters),
+                    hostTriple: self.hostBuildParameters.triple
                 ),
                 fileSystem: self.fileSystem,
                 observabilityScope: self.observabilityScope,

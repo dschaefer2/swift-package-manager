@@ -206,7 +206,11 @@ extension ManifestLoaderProtocol {
             fileSystem: fileSystem,
             currentToolsVersion: currentToolsVersion
         )
-        let manifestToolsVersion = try ToolsVersionParser.parse(manifestPath: manifestPath, fileSystem: fileSystem)
+        let manifestToolsVersion = try ToolsVersionParser.parse(
+            manifestPath: manifestPath,
+            fileSystem: fileSystem,
+            packageIdentity: packageIdentity
+        )
         // validate the manifest tools-version against the toolchain tools-version
         try manifestToolsVersion.validateToolsVersion(
             currentToolsVersion,
@@ -383,6 +387,10 @@ public final class ManifestLoader: ManifestLoaderProtocol {
             traits: parsedManifest.traits,
             pruneDependencies: self.pruneDependencies
         )
+
+        for identity in manifest.duplicateDependencyIdentities {
+            observabilityScope.emit(.duplicatePackageDependency(identity: identity))
+        }
 
         // Inform the delegate.
         delegateQueue.async { [delegate = self.delegate] in
@@ -862,11 +870,13 @@ public final class ManifestLoader: ManifestLoaderProtocol {
                 let gitInformation: ContextModel.GitInformation?
                 do {
                     let repo = GitRepository(path: manifestPath.parentDirectory)
-                    // These Git operations might block, consider making them async if performance is critical
-                    gitInformation = ContextModel.GitInformation(
-                        currentTag: repo.getCurrentTag(),
-                        currentCommit: try repo.getCurrentRevision().identifier,
-                        hasUncommittedChanges: repo.hasUncommittedChanges()
+                    async let tag = repo.getCurrentTag()
+                    async let commit = try repo.getCurrentRevision().identifier
+                    async let uncommitted = repo.hasUncommittedChanges()
+                    gitInformation = try await ContextModel.GitInformation(
+                        currentTag: tag,
+                        currentCommit: commit,
+                        hasUncommittedChanges: uncommitted
                     )
                 } catch {
                     // Ignore errors getting git info
