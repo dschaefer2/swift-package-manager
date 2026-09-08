@@ -10,7 +10,11 @@
 //
 //===----------------------------------------------------------------------===//
 
+#if canImport(FoundationEssentials)
+@_implementationOnly import FoundationEssentials
+#else
 @_implementationOnly import Foundation
+#endif
 
 /// The basic building block of a Swift package.
 ///

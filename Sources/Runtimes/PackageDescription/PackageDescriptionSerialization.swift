@@ -10,10 +10,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#if USE_IMPL_ONLY_IMPORTS
-@_implementationOnly import Foundation
+#if canImport(FoundationEssentials)
+@_implementationOnly import FoundationEssentials
 #else
-import Foundation
+@_implementationOnly import Foundation
 #endif
 
 enum Serialization {

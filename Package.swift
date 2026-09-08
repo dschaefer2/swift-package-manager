@@ -162,7 +162,7 @@ let package = Package(
         ),
         .library(
             name: "PackageDescription",
-            type: .dynamic,
+            type: .static,
             targets: ["PackageDescription", "CompilerPluginSupport"]
         ),
         .library(
@@ -348,6 +348,9 @@ let package = Package(
                 "Basics",
                 "PackageModel",
                 "SourceControl",
+                .product(name: "WasmKit", package: "WasmKit"),
+                .product(name: "WasmKitWASI", package: "WasmKit"),
+                .product(name: "WasmParser", package: "WasmKit")
             ],
             exclude: ["CMakeLists.txt", "README.md"],
             swiftSettings: commonExperimentalFeatures
@@ -1142,6 +1145,7 @@ if ProcessInfo.processInfo.environment["SWIFTCI_USE_LOCAL_DEPS"] == nil {
         .package(url: "https://github.com/swiftlang/swift-toolchain-sqlite.git", revision: "1.0.9"),
         // Not in toolchain, used for use in previewing documentation
         .package(url: "https://github.com/swiftlang/swift-docc-plugin", from: "1.5.0"),
+        .package(url: "https://github.com/swiftwasm/WasmKit", revision: "0.3.1"),
     ]
     if !swiftDriverDeps.isEmpty {
         package.dependencies += [

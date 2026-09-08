@@ -14,7 +14,12 @@
 @_implementationOnly import ucrt
 @_implementationOnly import struct WinSDK.HANDLE
 #endif
+#if canImport(FoundationEssentials)
+@_implementationOnly import FoundationEssentials
+@_implementationOnly import WASILibc
+#else
 @_implementationOnly import Foundation
+#endif
 
 /// The configuration of a Swift package.
 ///
@@ -405,7 +410,18 @@ public final class Package {
 #else
         if let optIdx = CommandLine.arguments.firstIndex(of: "-fileno") {
             if let jsonOutputFileDesc = Int32(CommandLine.arguments[optIdx + 1]) {
+                print("Dumping!")
                 dumpPackageAtExit(self, to: jsonOutputFileDesc)
+            }
+        }
+        if let fileName = CommandLine.arguments.firstIndex(of: "-file") {
+            if let file = fopen(CommandLine.arguments[fileName], "w") {
+                print("Really Dumping! \(fileno(file))")
+                dumpPackageAtExit(self, to: fileno(file))
+                fclose(file)
+            } else {
+                print("Open failed :(")
+                dumpPackageAtExit(self, to: 1)
             }
         }
 #endif
@@ -533,7 +549,7 @@ public enum SystemPackageProvider {
 
 // MARK: - Package Dumping
 
-private func manifestToJSON(_ package: Package) -> String {
+private func manifestToJSON(_ package: Package) -> Data {
     struct Output: Codable {
         let package: Serialization.Package
         let errors: [String]
@@ -542,8 +558,8 @@ private func manifestToJSON(_ package: Package) -> String {
 
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-    let data = try! encoder.encode(Output(package: .init(package), errors: errors, version: 2))
-    return String(decoding: data, as: UTF8.self)
+    return try! encoder.encode(Output(package: .init(package), errors: errors, version: 2))
+//    return String(decoding: data, as: UTF8.self)
 }
 
 var errors: [String] = []
@@ -577,9 +593,14 @@ private var dumpInfo: (package: Package, fileDesc: Int32)?
 private func dumpPackageAtExit(_ package: Package, to fileDesc: Int32) {
     func dump() {
         guard let dumpInfo else { return }
-        guard let fd = fdopen(dumpInfo.fileDesc, "w") else { return }
-        fputs(manifestToJSON(dumpInfo.package), fd)
-        fclose(fd)
+        manifestToJSON(dumpInfo.package).withUnsafeBytes { buff in
+            _ = write(dumpInfo.fileDesc, buff.baseAddress, buff.count)
+            print()
+            print("New dump")
+        }
+//        guard let fd = fdopen(dumpInfo.fileDesc, "w") else { return }
+//        fputs(manifestToJSON(dumpInfo.package), fd)
+//        fclose(fd)
     }
     dumpInfo = (package, fileDesc)
     atexit(dump)

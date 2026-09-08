@@ -825,6 +825,7 @@ public final class ManifestLoader: ManifestLoaderProtocol {
                 throw error // Re-throw process errors
             }
 
+            print("compile:", compileStart.distance(to: .now()).descriptionInSeconds)
             delegateQueue?.async { [delegate = self.delegate] in
                 delegate?.didCompile(
                     packageIdentity: packageIdentity,
@@ -937,6 +938,7 @@ public final class ManifestLoader: ManifestLoaderProtocol {
                 throw error // Re-throw process errors
             }
 
+            print("evaluate:", evaluationStart.distance(to: .now()).descriptionInSeconds)
             delegateQueue?.async { [delegate = self.delegate] in
                 delegate?.didEvaluate(
                     packageIdentity: packageIdentity,

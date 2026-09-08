@@ -941,7 +941,7 @@ public final class SwiftCommandState {
         return rootManifests.values.map { $0.toolsVersion }.min()
     }
 
-    func getManifestLoader() throws -> ManifestLoader {
+    func getManifestLoader() throws -> ManifestLoaderProtocol {
         try self._manifestLoader.get()
     }
 
@@ -1209,7 +1209,7 @@ public final class SwiftCommandState {
         )
     })
 
-    private lazy var _manifestLoader: Result<ManifestLoader, Swift.Error> = Result(catching: {
+    private lazy var _manifestLoader: Result<ManifestLoaderProtocol, Swift.Error> = Result(catching: {
         let cachePath: AbsolutePath? = switch (
             self.options.caching.shouldDisableManifestCaching,
             self.options.caching.manifestCachingMode
@@ -1230,7 +1230,8 @@ public final class SwiftCommandState {
             extraManifestFlags.append("-v")
         }
 
-        return try ManifestLoader(
+//        return try ManifestLoader(
+        return try WASMManifestLoader(
             // Always use the host toolchain's resources for parsing manifest.
             toolchain: self.getHostToolchain(),
             isManifestSandboxEnabled: !self.shouldDisableSandbox,
