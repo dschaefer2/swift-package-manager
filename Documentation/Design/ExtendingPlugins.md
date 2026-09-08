@@ -66,3 +66,10 @@ To help confirm we have the desired capability and ergonomics, we'll produce exa
 - Simple Java compile, produce jar from classes
 - SDL that includes an executable that shows calls into SDL working
     - Builds for host and for Android including creating an APK
+
+## Future Work
+Can we use external binary targets to generalize prebuilts?
+    - Somehow associate an external source target with a list of external binary targets that are prebuilts of the source target.
+- If one of the binary targets have successful target conditions, use it, otherwise use the source target
+
+We might want to make the binary target support future work as well until we can figure that out. Source would be fine for now.

@@ -14,51 +14,52 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-subprocess", from: "0.5.0"),
         .package(url: "https://github.com/swiftlang/swift-syntax", from: "603.0.1"),
-        .externalSource(path: "../SDL"),
-    ],
-    externals: [
-        Package(
-            name: "SDL",
-            products: [
-                .library(name: "SDL3", type: .static, targets: ["SDL3"]),
-            ],
-            targets: [
-                .externalLibrary(
-                    name: "SDL3",
-                    cSettings: [
-                        .publicHeaderPath("include"),
-                    ],
-                    linkerSettings: [
-                        .linkedFramework("CoreMedia", .when(platforms: [.macOS])),
-                        .linkedFramework("CoreVideo", .when(platforms: [.macOS])),
-                        .linkedFramework("Cocoa", .when(platforms: [.macOS])),
-                        .linkedFramework("UniformTypeIdentifiers", .when(platforms: [.macOS])),
-                        .linkedFramework("IOKit", .when(platforms: [.macOS])),
-                        .linkedFramework("ForceFeedback", .when(platforms: [.macOS])),
-                        .linkedFramework("Carbon", .when(platforms: [.macOS])),
-                        .linkedFramework("CoreAudio", .when(platforms: [.macOS])),
-                        .linkedFramework("AudioToolbox", .when(platforms: [.macOS])),
-                        .linkedFramework("AVFoundation", .when(platforms: [.macOS])),
-                        .linkedFramework("Foundation", .when(platforms: [.macOS])),
-                        .linkedFramework("GameController", .when(platforms: [.macOS])),
-                        .linkedFramework("Metal", .when(platforms: [.macOS])),
-                        .linkedFramework("UserNotifications", .when(platforms: [.macOS])),
-                        .linkedFramework("QuartzCore", .when(platforms: [.macOS])),
-                        .linkedFramework("Security", .when(platforms: [.macOS])),
-                        .linkedFramework("CoreHaptics", .when(platforms: [.macOS])),
-                    ],
-                    plugins: [
-                        "CMakeBuilderPlugin"
-                    ]
-                ),
-            ]
-        ),
     ],
     targets: [
+        .externalLibrary(
+            name: "SDL3",
+            location: .path("../SDL"),
+            cSettings: [
+                .publicHeaderPath("include"),
+            ],
+            linkerSettings: [
+                .linkedFramework("CoreMedia", .when(platforms: [.macOS])),
+                .linkedFramework("CoreVideo", .when(platforms: [.macOS])),
+                .linkedFramework("Cocoa", .when(platforms: [.macOS])),
+                .linkedFramework("UniformTypeIdentifiers", .when(platforms: [.macOS])),
+                .linkedFramework("IOKit", .when(platforms: [.macOS])),
+                .linkedFramework("ForceFeedback", .when(platforms: [.macOS])),
+                .linkedFramework("Carbon", .when(platforms: [.macOS])),
+                .linkedFramework("CoreAudio", .when(platforms: [.macOS])),
+                .linkedFramework("AudioToolbox", .when(platforms: [.macOS])),
+                .linkedFramework("AVFoundation", .when(platforms: [.macOS])),
+                .linkedFramework("Foundation", .when(platforms: [.macOS])),
+                .linkedFramework("GameController", .when(platforms: [.macOS])),
+                .linkedFramework("Metal", .when(platforms: [.macOS])),
+                .linkedFramework("UserNotifications", .when(platforms: [.macOS])),
+                .linkedFramework("QuartzCore", .when(platforms: [.macOS])),
+                .linkedFramework("Security", .when(platforms: [.macOS])),
+                .linkedFramework("CoreHaptics", .when(platforms: [.macOS])),
+            ],
+            plugins: [
+                "CMakeBuilderPlugin"
+            ]
+        ),
+        .plugin(
+            name: "CMakeBuilderPlugin",
+            capability: .buildTool,
+            dependencies: ["CMakeBuilder"]
+        ),
+        .executableTarget(
+            name: "CMakeBuilder",
+            dependencies: [
+                .product(name: "Subprocess", package: "swift-subprocess"),
+            ]
+        ),
         .target(
             name: "SDL",
             dependencies: [
-                .product(name: "SDL3", package: "SDL"),
+                "SDL3",
             ],
             plugins: ["SwiftSDLGenPlugin"]
         ),
@@ -78,19 +79,6 @@ let package = Package(
         .testTarget(
             name: "SDLTests",
             dependencies: ["SDL"]
-        ),
-
-        // Plugin and builder to build external package
-        .plugin(
-            name: "CMakeBuilderPlugin",
-            capability: .externalBuilder,
-            dependencies: ["CMakeBuilder"]
-        ),
-        .executableTarget(
-            name: "CMakeBuilder",
-            dependencies: [
-                .product(name: "Subprocess", package: "swift-subprocess"),
-            ]
         ),
     ],
 )
