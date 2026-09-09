@@ -39,8 +39,6 @@ public final class Target {
         case plugin
         /// A target that provides a Swift macro.
         case `macro`
-        /// A target that is managed by build tool plugins
-        case custom
     }
 
     /// The different types of a target's dependency on another entity.
@@ -339,10 +337,6 @@ public final class Target {
                 pluginCapability == nil &&
                 cSettings == nil &&
                 cxxSettings == nil
-            )
-        case .custom:
-            precondition(
-                url == nil
             )
         }
     }
@@ -1239,27 +1233,6 @@ public final class Target {
             type: .plugin,
             packageAccess: packageAccess,
             pluginCapability: capability)
-    }
-
-    @available(_PackageDescription, introduced: 6.5)
-    public static func custom(
-        name: String,
-        dependencies: [Dependency] = [],
-        path: String? = nil,
-        sources: [String]? = nil,
-        plugins: [PluginUsage]? = nil
-    ) -> Target {
-        return Target(
-            name: name,
-            dependencies: dependencies,
-            path: path,
-            exclude: [],
-            sources: sources,
-            publicHeadersPath: nil,
-            type: .custom,
-            packageAccess: true,
-            plugins: plugins
-        )
     }
 }
 

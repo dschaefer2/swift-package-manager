@@ -548,9 +548,6 @@ public final class PackagePIFBuilder {
 
             case .macro:
                 break // TODO: Double-check what's going on here as we skip snippet modules too (rdar://147705448)
-
-            case .custom:
-                try projectBuilder.makeCustomTargetProduct(product)
             }
         }
 

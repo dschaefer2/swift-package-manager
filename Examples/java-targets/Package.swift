@@ -10,7 +10,7 @@ let package = Package(
         .package(url: "https://github.com/swiftlang/swift-subprocess", from: "0.5.0"),
     ],
     targets: [
-        .custom(
+        .target(
             name: "JavaTarget",
             plugins: [
                 "JavaBuilderPlugin",
@@ -29,7 +29,7 @@ let package = Package(
                 .product(name: "Subprocess", package: "swift-subprocess"),
             ]
         ),
-        .custom(name: "JarTarget",
+        .target(name: "JarTarget",
             dependencies: [
                 "JavaTarget",
             ],

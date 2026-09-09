@@ -1599,7 +1599,7 @@ public final class PackageBuilder {
                 guard self.validateLibraryProduct(product, with: modules) else {
                     continue
                 }
-            case .test, .macro, .custom:
+            case .test, .macro:
                 break
             case .executable, .snippet:
                 guard self.validateExecutableProduct(product, with: modules) else {
@@ -1621,7 +1621,7 @@ public final class PackageBuilder {
         // for them.
         let explicitProductsModules = Set(self.manifest.products.flatMap { product -> [String] in
             switch product.type {
-            case .library, .plugin, .test, .macro, .custom:
+            case .library, .plugin, .test, .macro:
                 return []
             case .executable, .snippet:
                 return product.targets
@@ -1668,18 +1668,6 @@ public final class PackageBuilder {
                     append(product)
                 }
             }
-        }
-
-        for module in modules where module.type == .custom {
-            // TODO: always explicit? wen merge products and targets?
-            let product = try Product(
-                package: self.identity,
-                name: module.name,
-                type: .custom,
-                modules: [module],
-                isImplicit: true
-            )
-            append(product)
         }
 
         // Create a special REPL product that contains all the library targets.

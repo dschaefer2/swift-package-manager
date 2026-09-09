@@ -238,7 +238,6 @@ extension Serialization.TargetType {
         case .binary: self = .binary
         case .plugin: self = .plugin
         case .macro: self = .macro
-        case .custom: self = .custom
         }
     }
 }

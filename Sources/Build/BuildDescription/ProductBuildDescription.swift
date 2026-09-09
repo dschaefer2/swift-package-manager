@@ -204,7 +204,7 @@ public final class ProductBuildDescription: SPMBuildCore.ProductBuildDescription
         // args += ["-Xlinker", "/ignore:4217"]
 
         switch derivedProductType {
-        case .macro, .custom:
+        case .macro:
             throw InternalError("macro not supported") // should never be reached
         case .library(.automatic):
             throw InternalError("automatic library not supported")
@@ -319,7 +319,7 @@ public final class ProductBuildDescription: SPMBuildCore.ProductBuildDescription
                 useStdlibRpath = type == .dynamic
             case .test, .executable, .snippet, .macro:
                 useStdlibRpath = true
-            case .plugin, .custom:
+            case .plugin:
                 throw InternalError("unexpectedly asked to generate linker arguments for a plugin product")
             }
 

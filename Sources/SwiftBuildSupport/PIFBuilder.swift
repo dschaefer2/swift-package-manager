@@ -281,7 +281,6 @@ public final class PIFBuilder {
                 // creating a list of results (one for each plugin usage).
                 var buildToolPluginResults: [BuildToolPluginInvocationResult] = []
                 var buildCommands: [PackagePIFBuilder.CustomBuildCommand] = []
-                var productFiles: [AbsolutePath] = []
                 var prebuildCommands: [BuildToolPluginInvocationResult.PrebuildCommand] = []
 
                 for plugin in module.pluginDependencies(satisfying: buildParameters.buildEnvironment) {
@@ -389,8 +388,6 @@ public final class PIFBuilder {
 
                     prebuildCommands.append(contentsOf: result.prebuildCommands)
 
-                    productFiles.append(contentsOf: result.productFiles)
-
                     buildCommands.append(contentsOf: result.buildCommands.map( { buildCommand in
                         var newEnv: Environment = buildCommand.configuration.environment
 
@@ -457,7 +454,6 @@ public final class PIFBuilder {
                 let result = PackagePIFBuilder.BuildToolPluginInvocationResult(
                     prebuildCommandOutputPaths: runResults.flatMap( { $0.derivedFiles }),
                     buildCommands: buildCommands,
-                    productFiles: productFiles
                 )
 
                 // Add a BuildToolPluginInvocationResult to the mapping.

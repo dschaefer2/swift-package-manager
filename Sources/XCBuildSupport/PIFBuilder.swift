@@ -390,7 +390,7 @@ final class PackagePIFProjectBuilder: PIFProjectBuilder {
             try self.addMainModuleTarget(for: product)
         case .library:
             self.addLibraryTarget(for: product)
-        case .plugin, .macro, .custom:
+        case .plugin, .macro:
             return
         }
     }
@@ -1620,8 +1620,6 @@ extension ProductType {
             .plugin
         case .macro:
             .macro
-        case .custom:
-            .custom
         }
     }
 }

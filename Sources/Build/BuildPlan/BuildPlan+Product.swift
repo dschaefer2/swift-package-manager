@@ -178,7 +178,7 @@ extension BuildPlan {
                         product: $0.product,
                         context: $0.destination
                     ) }
-                case .test, .executable, .snippet, .macro, .custom:
+                case .test, .executable, .snippet, .macro:
                     return []
                 }
             }

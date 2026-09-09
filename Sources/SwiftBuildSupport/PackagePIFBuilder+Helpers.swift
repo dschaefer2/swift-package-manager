@@ -290,7 +290,6 @@ extension PackageModel.ProductType {
         case .library: .library
         case .plugin: .plugin
         case .macro: .macro
-        case .custom: .custom
         }
     }
 }
@@ -892,7 +891,7 @@ extension PackageGraph.ResolvedProduct {
         switch self.type {
         case .executable, .snippet, .test:
             true
-        case .library, .macro, .plugin, .custom:
+        case .library, .macro, .plugin:
             false
         }
     }
@@ -910,7 +909,7 @@ extension PackageGraph.ResolvedProduct {
         switch self.type {
         case .executable, .snippet:
             true
-        case .library, .test, .plugin, .macro, .custom:
+        case .library, .test, .plugin, .macro:
             false
         }
     }
@@ -953,7 +952,7 @@ extension PackageGraph.ResolvedProduct {
         switch self.type {
         case .library, .executable, .snippet, .test, .macro:
             true
-        case .plugin, .custom:
+        case .plugin:
             false
         }
     }
