@@ -453,7 +453,7 @@ public final class PIFBuilder {
 
                 let result = PackagePIFBuilder.BuildToolPluginInvocationResult(
                     prebuildCommandOutputPaths: runResults.flatMap( { $0.derivedFiles }),
-                    buildCommands: buildCommands,
+                    buildCommands: buildCommands
                 )
 
                 // Add a BuildToolPluginInvocationResult to the mapping.

@@ -415,7 +415,8 @@ final class PackagePIFProjectBuilder: PIFProjectBuilder {
             // Macros are not supported when using XCBuild, similar to package plugins.
             return
         case .custom:
-            fatalError("TODO:")
+            // Custom targets are not supported when using XCBuild
+            return
         }
     }
 
