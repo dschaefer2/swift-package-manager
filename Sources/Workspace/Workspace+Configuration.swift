@@ -20,9 +20,6 @@ import PackageRegistry
 
 import struct TSCBasic.ByteString
 
-import protocol TSCUtility.SimplePersistanceProtocol
-import class TSCUtility.SimplePersistence
-
 // MARK: - Location
 
 extension Workspace {
@@ -368,15 +365,17 @@ extension Workspace.Configuration {
 
         public func makeRegistryAuthorizationProvider(
             fileSystem: FileSystem,
-            observabilityScope: ObservabilityScope
+            observabilityScope: ObservabilityScope,
+            registryURLs: () throws -> [URL]
         ) throws -> AuthorizationProvider? {
             let env = Environment.current
             if let token = ConfigurableEnvVar.SWIFTPM_REGISTRY_TOKEN.value(from: env), !token.isEmpty {
-                return EnvironmentAuthorizationProvider(kind: .registry)
+                // registryURLs can be read from disk and so we call the closure only when needed.
+                return try EnvironmentAuthorizationProvider(kind: .registry(origins: registryURLs()))
             }
             if let login = ConfigurableEnvVar.SWIFTPM_REGISTRY_LOGIN.value(from: env), !login.isEmpty,
                let password = ConfigurableEnvVar.SWIFTPM_REGISTRY_PASSWORD.value(from: env), !password.isEmpty {
-                return EnvironmentAuthorizationProvider(kind: .registry)
+                return try EnvironmentAuthorizationProvider(kind: .registry(origins: registryURLs()))
             } else if let login = ConfigurableEnvVar.SWIFTPM_REGISTRY_LOGIN.value(from: env), !login.isEmpty {
                 observabilityScope.emit(
                     warning: "SWIFTPM_REGISTRY_LOGIN is set but SWIFTPM_REGISTRY_PASSWORD is not; both are required for login/password authentication"
@@ -469,7 +468,7 @@ extension Workspace.Configuration {
 
 extension Workspace.Configuration {
     public struct Mirrors {
-        private let localMirrors: MirrorsStorage
+        private let localMirrors: MirrorsStorage?
         private let sharedMirrors: MirrorsStorage?
         private let fileSystem: FileSystem
 
@@ -511,10 +510,16 @@ extension Workspace.Configuration {
         ///   - sharedMirrorsFile: Path to the shared mirrors configuration file, defaults to the standard location.
         public init(
             fileSystem: FileSystem,
-            localMirrorsFile: AbsolutePath,
+            localMirrorsFile: AbsolutePath?,
             sharedMirrorsFile: AbsolutePath?
         ) throws {
-            self.localMirrors = .init(path: localMirrorsFile, fileSystem: fileSystem, deleteWhenEmpty: true)
+            // At least one of local or shared is required
+            if localMirrorsFile == nil, sharedMirrorsFile == nil {
+                throw StringError("No mirrors configuration provided")
+            }
+
+            self.localMirrors = localMirrorsFile
+                .map { .init(path: $0, fileSystem: fileSystem, deleteWhenEmpty: true) }
             self.sharedMirrors = sharedMirrorsFile
                 .map { .init(path: $0, fileSystem: fileSystem, deleteWhenEmpty: false) }
             self.fileSystem = fileSystem
@@ -525,7 +530,10 @@ extension Workspace.Configuration {
 
         @discardableResult
         public func applyLocal(handler: (inout DependencyMirrors) throws -> Void) throws -> DependencyMirrors {
-            try self.localMirrors.apply(handler: handler)
+            guard let localMirrors else {
+                throw StringError("local mirrors not configured")
+            }
+            try localMirrors.apply(handler: handler)
             try self.computeMirrors()
             return self.mirrors
         }
@@ -533,7 +541,7 @@ extension Workspace.Configuration {
         @discardableResult
         public func applyShared(handler: (inout DependencyMirrors) throws -> Void) throws -> DependencyMirrors {
             guard let sharedMirrors else {
-                throw InternalError("shared mirrors not configured")
+                throw StringError("shared mirrors not configured")
             }
             try sharedMirrors.apply(handler: handler)
             try self.computeMirrors()
@@ -547,8 +555,7 @@ extension Workspace.Configuration {
                 self._mirrors.removeAll()
 
                 // prefer local mirrors to shared ones
-                let local = try self.localMirrors.get()
-                if !local.isEmpty {
+                if let local = try self.localMirrors?.get(), !local.isEmpty {
                     try self._mirrors.append(contentsOf: local)
                     return
                 }

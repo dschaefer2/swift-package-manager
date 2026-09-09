@@ -167,6 +167,17 @@ enum HostToPluginMessage: Codable {
                         linkedLibraries: [String],
                         linkedFrameworks: [String])
 
+                    case mixedSourceModuleInfo(
+                        moduleName: String,
+                        kind: SourceModuleKind,
+                        sourceFiles: [File],
+                        compilationConditions: [String],
+                        preprocessorDefinitions: [String],
+                        headerSearchPaths: [String],
+                        publicHeadersDirId: URL.Id?,
+                        linkedLibraries: [String],
+                        linkedFrameworks: [String])
+                    
                     case customTargetInfo(
                         moduleName: String,
                         kind: SourceModuleKind,

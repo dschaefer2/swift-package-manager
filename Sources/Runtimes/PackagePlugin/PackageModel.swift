@@ -279,6 +279,22 @@ public protocol SourceModuleTarget: Target {
     /// target the current plugin is being applied to, but not necessarily to other targets in the package graph.
     @available(_PackageDescription, introduced: 6.0)
     var pluginGeneratedResources: [URL] { get }
+
+    /// Any custom compilation conditions for the Swift sources of the module.
+    @available(_PackageDescription, introduced: 6.5)
+    var swiftCompilationConditions: [String] { get }
+
+    /// Any preprocessor definitions for the C-family sources of the module.
+    @available(_PackageDescription, introduced: 6.5)
+    var clangPreprocessorDefinitions: [String] { get }
+
+    /// Any custom header search paths.
+    @available(_PackageDescription, introduced: 6.5)
+    var headerSearchPaths: [String] { get }
+
+    /// The directory containing public headers
+    @available(_PackageDescription, introduced: 6.5)
+    var publicHeadersDirectoryURL: URL? { get }
 }
 
 /// The kind of module.
@@ -300,6 +316,7 @@ public enum ModuleKind {
 }
 
 /// A target consisting of a source code module compiled using Swift.
+@available(_PackageDescription, deprecated: 6.5, message: "Use SourceModuleTarget directly instead of casting to a concrete type")
 public struct SwiftSourceModuleTarget: SourceModuleTarget {
     /// Unique identifier for the target.
     public let id: ID
@@ -359,9 +376,22 @@ public struct SwiftSourceModuleTarget: SourceModuleTarget {
     /// to the given target before the plugin being executed.
     @available(_PackageDescription, introduced: 6.0)
     public let pluginGeneratedResources: [URL]
+
+    @available(_PackageDescription, introduced: 6.5)
+    public var swiftCompilationConditions: [String] { self.compilationConditions }
+
+    @available(_PackageDescription, introduced: 6.5)
+    public var clangPreprocessorDefinitions: [String] { [] }
+
+    @available(_PackageDescription, introduced: 6.5)
+    public var headerSearchPaths: [String] { [] }
+
+    @available(_PackageDescription, introduced: 6.5)
+    public var publicHeadersDirectoryURL: URL? { nil }
 }
 
 /// A target consisting of a source code module compiled using Clang.
+@available(_PackageDescription, deprecated: 6.5, message: "Use SourceModuleTarget directly instead of casting to a concrete type")
 public struct ClangSourceModuleTarget: SourceModuleTarget {
     /// Unique identifier for the target.
     public let id: ID
@@ -437,6 +467,33 @@ public struct ClangSourceModuleTarget: SourceModuleTarget {
     /// to the given target before the plugin currently being executed.
     @available(_PackageDescription, introduced: 6.0)
     public let pluginGeneratedResources: [URL]
+
+    @available(_PackageDescription, introduced: 6.5)
+    public var swiftCompilationConditions: [String] { [] }
+
+    @available(_PackageDescription, introduced: 6.5)
+    public var clangPreprocessorDefinitions: [String] { self.preprocessorDefinitions }
+}
+
+/// A source module target containing any combination of sources. Thie is intentionally internal, clients should only interact
+/// with it via `SourceModuleTarget`.
+internal struct ConcreteSourceModuleTarget: SourceModuleTarget {
+    let id: ID
+    let name: String
+    let kind: ModuleKind
+    let directory: Path
+    let directoryURL: URL
+    let dependencies: [TargetDependency]
+    let moduleName: String
+    let sourceFiles: FileList
+    let swiftCompilationConditions: [String]
+    let clangPreprocessorDefinitions: [String]
+    let headerSearchPaths: [String]
+    let publicHeadersDirectoryURL: URL?
+    let linkedLibraries: [String]
+    let linkedFrameworks: [String]
+    let pluginGeneratedSources: [URL]
+    let pluginGeneratedResources: [URL]
 }
 
 public struct CustomTarget: SourceModuleTarget {
@@ -463,6 +520,38 @@ public struct CustomTarget: SourceModuleTarget {
     public let dependencies: [TargetDependency]
 
     public let sourceFiles: FileList
+
+    public let swiftCompilationConditions: [String] = []
+
+    public let clangPreprocessorDefinitions: [String] = []
+
+    public let headerSearchPaths: [String] = []
+
+    public let publicHeadersDirectoryURL: URL? = nil
+
+    public init(
+        id: ID,
+        name: String,
+        moduleName: String,
+        kind: ModuleKind,
+        pluginGeneratedSources: [URL],
+        pluginGeneratedResources: [URL],
+        directory: Path,
+        directoryURL: URL,
+        dependencies: [TargetDependency],
+        sourceFiles: FileList
+    ) {
+        self.id = id
+        self.name = name
+        self.moduleName = moduleName
+        self.kind = kind
+        self.pluginGeneratedSources = pluginGeneratedSources
+        self.pluginGeneratedResources = pluginGeneratedResources
+        self.directory = directory
+        self.directoryURL = directoryURL
+        self.dependencies = dependencies
+        self.sourceFiles = sourceFiles
+    }
 }
 
 /// A target describing an artifact that is distributed as a binary.

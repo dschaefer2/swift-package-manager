@@ -235,6 +235,36 @@ struct SwiftBuildSystemTests {
         }
     }
 
+    @Test
+    func userSwiftExecOverrideIsAlwaysHonoured() async throws {
+        let base = try UserToolchain.default
+        let overrideCompiler = base.swiftCompilerPath.parentDirectory.appending("swift")
+        var environment = Environment.current
+        environment["SWIFT_EXEC"] = overrideCompiler.pathString
+        let overridden = try UserToolchain(swiftSDK: base.swiftSDK, environment: environment)
+        try #require(overridden.swiftCompilerPath == overrideCompiler)
+        try #require(overrideCompiler != base.swiftCompilerPath)
+
+        try await withInstantiatedSwiftBuildSystem(
+            fromFixture: "PIFBuilder/Simple",
+            buildParameters: mockBuildParameters(
+                destination: .host,
+                toolchain: overridden,
+                buildSystemKind: .swiftbuild,
+            ),
+        ) { swiftBuild, service, session, _, _ in
+            let buildSettings: SWBBuildParameters = try await swiftBuild.makeBuildParameters(
+                service: service,
+                session: session,
+                symbolGraphOptions: nil,
+                shouldDisableSandbox: false,
+            )
+
+            let synthesized = try #require(buildSettings.overrides.synthesized)
+            #expect(synthesized.table["SWIFT_EXEC"] == overrideCompiler.pathStringWithPosixSlashes)
+        }
+    }
+
     @Suite(
         .tags(
             .FunctionalArea.LinkSwiftStaticStdlib,
@@ -870,6 +900,68 @@ struct SwiftBuildSystemTests {
 
             let runDestination = try #require(buildSettings.activeRunDestination)
             #expect(runDestination.sdk == sdkRoot.pathString)
+        }
+    }
+
+    @Suite
+    struct AdHocEntitlementsTests {
+        private static let getTaskAllowKey = "com.apple.security.get-task-allow"
+        private static let applicationIdentifierKeys = [
+            "com.apple.application-identifier",
+            "application-identifier",
+        ]
+
+        @Test
+        func macOSSignatureAppliesOnlyGetTaskAllow() throws {
+            let (signed, simulated) = SwiftBuildSystemPlanningOperationDelegate.adHocSignedEntitlements(
+                sdkRoot: "macosx.sdk",
+                entitlementsDestination: "Signature",
+                shouldEnableDebuggingEntitlement: true
+            )
+
+            #expect(signed == [Self.getTaskAllowKey: .plBool(true)])
+            #expect(simulated.isEmpty)
+            for key in Self.applicationIdentifierKeys {
+                #expect(signed[key] == nil, "ad-hoc signature must not inject \(key)")
+            }
+        }
+
+        @Test
+        func macOSWithoutDebuggingEntitlementSignsNothing() throws {
+            let (signed, simulated) = SwiftBuildSystemPlanningOperationDelegate.adHocSignedEntitlements(
+                sdkRoot: "macosx.sdk",
+                entitlementsDestination: "Signature",
+                shouldEnableDebuggingEntitlement: false
+            )
+
+            #expect(signed.isEmpty)
+            #expect(simulated.isEmpty)
+        }
+
+        @Test
+        func simulatorAppliesGetTaskAllowToSimulatedEntitlements() throws {
+            let (signed, simulated) = SwiftBuildSystemPlanningOperationDelegate.adHocSignedEntitlements(
+                sdkRoot: "iphonesimulator.sdk",
+                entitlementsDestination: "__entitlements",
+                shouldEnableDebuggingEntitlement: true
+            )
+
+            #expect(signed.isEmpty)
+            #expect(simulated == [Self.getTaskAllowKey: .plBool(true)])
+            for key in Self.applicationIdentifierKeys {
+                #expect(simulated[key] == nil, "ad-hoc simulated entitlements must not inject \(key)")
+            }
+        }
+
+        @Test
+        func nonDarwinUsesUnprefixedGetTaskAllowKey() throws {
+            let (signed, _) = SwiftBuildSystemPlanningOperationDelegate.adHocSignedEntitlements(
+                sdkRoot: "linux",
+                entitlementsDestination: "Signature",
+                shouldEnableDebuggingEntitlement: true
+            )
+
+            #expect(signed == ["get-task-allow": .plBool(true)])
         }
     }
 }

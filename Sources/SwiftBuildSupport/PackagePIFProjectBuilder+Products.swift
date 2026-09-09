@@ -113,7 +113,9 @@ extension PackagePIFProjectBuilder {
         // Configure the target-wide build settings. The details depend on the kind of product we're building,
         // but are in general the ones that are suitable for end-product artifacts such as executables and test bundles.
         var settings: ProjectModel.BuildSettings = package.underlying.packageBaseBuildSettings
+        var impartedSettings = BuildSettings()
         settings[.TARGET_NAME] = product.name
+        settings[.BUILD_SERVER_PROTOCOL_TARGET_DISPLAY_NAME] = product.name
         settings[.TARGET_TEMP_DIR_SUFFIX] = "-p"
         settings[.PACKAGE_RESOURCE_TARGET_KIND] = "regular"
         settings[.PRODUCT_NAME] = "$(TARGET_NAME)"
@@ -140,6 +142,16 @@ extension PackagePIFProjectBuilder {
         if mainModule.type == .test {
             settings[.BUILD_SERVER_PROTOCOL_TARGET_TAGS, default: ["$(inherited)"]].append("test")
 
+            // A C-language test target does not necessarily define a clang module. However, BSP clients
+            // may infer a module name based on -fmodule-name to disambiguate tests, so always pass the
+            // flag.
+            settings[.OTHER_CFLAGS].lazilyInitializeAndMutate(initialValue: ["$(inherited)"]) {
+                $0.append("-fmodule-name=$(PRODUCT_MODULE_NAME)")
+            }
+            settings[.OTHER_CPLUSPLUSFLAGS].lazilyInitializeAndMutate(initialValue: ["$(inherited)"]) {
+                $0.append("-fmodule-name=$(PRODUCT_MODULE_NAME)")
+            }
+
             // FIXME: we shouldn't always include both the deep and shallow bundle paths here, but for that we'll need rdar://31867023
             if pifBuilder.addLocalRpaths != .never {
                 settings[.LD_RUNPATH_SEARCH_PATHS] = [
@@ -147,6 +159,21 @@ extension PackagePIFProjectBuilder {
                     "$(RPATH_ORIGIN)/../Frameworks",
                     "$(inherited)"
                 ]
+
+                // Apple platforms build xctest bundles for tests, so need an rpath relative to the embedded executable
+                // to reach adjacent build products.
+                if product.type == .test {
+                    settings[single: "APPLE_TEST_BUNDLE_RPATH"] = "$(APPLE_TEST_BUNDLE_RPATH_SHALLOW_BUNDLE_$(SHALLOW_BUNDLE:default=NO))"
+                    settings[single: "APPLE_TEST_BUNDLE_RPATH_SHALLOW_BUNDLE_YES"] = "@loader_path/../.."
+                    settings[single: "APPLE_TEST_BUNDLE_RPATH_SHALLOW_BUNDLE_NO"] = "@loader_path/../../.."
+
+                    for platform in [BuildSettings.Platform.macOS, .macCatalyst, .driverKit, .iOS, .watchOS, .tvOS, .xrOS] {
+                        settings[.LD_RUNPATH_SEARCH_PATHS, platform] = [
+                            "$(APPLE_TEST_BUNDLE_RPATH)",
+                            "$(inherited)"
+                        ]
+                    }
+                }
             }
             settings[.GENERATE_INFOPLIST_FILE] = "YES"
             settings[.SKIP_INSTALL] = "NO"
@@ -208,6 +235,25 @@ extension PackagePIFProjectBuilder {
         settings[.GCC_C_LANGUAGE_STANDARD] = mainModule.cLanguageStandard
         settings[.CLANG_CXX_LANGUAGE_STANDARD] = mainModule.cxxLanguageStandard
         settings[.SWIFT_ENABLE_BARE_SLASH_REGEX] = "NO"
+
+        // A mixed-source main module product (executable/test target) needs its own C sources exposed
+        // for import by its Swift sources. Test targets must also impart settings on the corresponding
+        // test runner.
+        if mainModule.usesSwift && mainModule.isMixedLanguageModule && mainModule.type != .macro {
+            let (moduleMapFileContents, moduleMapPath) = try self.configureSwiftTargetModuleMap(
+                for: mainModule,
+                targetSuffix: nil,
+                settings: &settings,
+                impartedSettings: &impartedSettings
+            )
+            settings[.DEFINES_MODULE] = "YES"
+            if let moduleMapFileContents {
+                settings[.MODULEMAP_FILE_CONTENTS] = moduleMapFileContents
+            }
+            if let moduleMapPath {
+                settings[.MODULEMAP_PATH] = moduleMapPath
+            }
+        }
 
         // Create a group for the source files of the main module
         // For now we use an absolute path for it, but we should really make it
@@ -522,6 +568,8 @@ extension PackagePIFProjectBuilder {
         // Custom source module build settings, if any.
         pifBuilder.delegate.configureSourceModuleBuildSettings(sourceModule: mainModule, settings: &settings)
 
+        self.addCxxStandardLibraryLinkSettings(for: mainModule, to: &settings)
+
         // Until this point the build settings for the target have been the same between debug and release
         // configurations.
         // The custom manifest settings might cause them to diverge.
@@ -535,16 +583,22 @@ extension PackagePIFProjectBuilder {
         allBuildSettings.apply(to: &debugSettings, for: .debug)
         allBuildSettings.apply(to: &releaseSettings, for: .release)
         self.project[keyPath: mainModuleTargetKeyPath].common.addBuildConfig { id in
-            BuildConfig(id: id, name: "Debug", settings: debugSettings)
+            BuildConfig(id: id, name: "Debug", settings: debugSettings, impartedBuildSettings: impartedSettings)
         }
         self.project[keyPath: mainModuleTargetKeyPath].common.addBuildConfig { id in
-            BuildConfig(id: id, name: "Release", settings: releaseSettings)
+            BuildConfig(id: id, name: "Release", settings: releaseSettings, impartedBuildSettings: impartedSettings)
         }
 
         // Collect linked binaries.
         let linkedPackageBinaries: [PackagePIFBuilder.LinkedPackageBinary] = mainModule.dependencies.compactMap {
             PackagePIFBuilder.LinkedPackageBinary(dependency: $0)
         }
+
+        let buildToolPluginInputs = Set(
+            (pifBuilder.buildToolPluginResultsByTargetName[mainModule.name] ?? [])
+                .flatMap(\.buildCommands)
+                .flatMap(\.inputPaths)
+        )
 
         let moduleOrProduct = PackagePIFBuilder.ModuleOrProduct(
             type: moduleOrProductType,
@@ -553,6 +607,7 @@ extension PackagePIFProjectBuilder {
             pifTarget: .target(self.project[keyPath: mainModuleTargetKeyPath]),
             indexableFileURLs: indexableFileURLs,
             headerFiles: headerFiles,
+            buildToolPluginInputs: buildToolPluginInputs,
             doccCatalogs: doccCatalogs,
             linkedPackageBinaries: linkedPackageBinaries,
             swiftLanguageVersion: mainModule.packageSwiftLanguageVersion(manifest: packageManifest),
@@ -629,6 +684,10 @@ extension PackagePIFProjectBuilder {
                 fatalError("Could not assign dynamic PIF target")
             }
             self.project[keyPath: pifTargetKeyPath].dynamicTargetVariantId = dynamicPifTarget.id
+
+            for module in libraryProduct.modules where module.isSourceModule {
+                self.modulesInPromotableAutomaticLibraries[module.name, default: []].insert(pifTarget.id)
+            }
         }
     }
 
@@ -737,6 +796,7 @@ extension PackagePIFProjectBuilder {
         self.project[keyPath: libraryUmbrellaTargetKeyPath] = libraryUmbrellaTargetForModules
 
         var settings: ProjectModel.BuildSettings = package.underlying.packageBaseBuildSettings
+        settings[.BUILD_SERVER_PROTOCOL_TARGET_DISPLAY_NAME] = product.name
 
         // Add other build settings when we're building an actual dylib.
         if desiredProductType == .dynamic {
@@ -758,8 +818,13 @@ extension PackagePIFProjectBuilder {
             // For dynamic libraries, track which source modules are DIRECT dependencies so we can set
             // SWIFT_COMPILE_FOR_STATIC_LINKING=NO on Windows for those modules.
             // Collect only DIRECT module dependencies (not recursive)
-            for module in product.modules where module.isSourceModule {
-                self.modulesInDynamicLibraries.insert(module.name)
+            //
+            // Skip the synthesized dynamic variant of an `.automatic` product: its modules are still
+            // linked statically by default, so flagging them here would compile them incorrectly.
+            if targetSuffix != .dynamic {
+                for module in product.modules where module.isSourceModule {
+                    self.modulesInDynamicLibraries.insert(module.name)
+                }
             }
         } else if productType == .staticArchive {
             settings[.TARGET_NAME] = product.targetName()
