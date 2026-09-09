@@ -1,5 +1,5 @@
 
-# Custom Targets and External Targets
+# Extending Plugins for Custom Targets and External Targets
 This feature breaks down restrictions on what files build plugin tools can produce. This includes being able to have a plugin without Swift/Clang sources but with other sources, or no sources at all, and let the plugins decide what commands with inputs and outputs to add to the build graph. This general concept is called Custom Targets though plugins should be able to produce any file for any type of target.
 We then build on this by introducing external targets that take a source tree, possibly downloaded from source control or a remote source archive, and plugins add commands to build that source to produce libraries or executables that can be introduced into the SwiftBuild build graph so Swift/Clang modules may depend on them.
 The aim 
@@ -65,14 +65,16 @@ Add module type for external libraries
 Add module type for external executable.
 - Adds the executable to the model.
 
-## Implementation Notes
-Things that need to be resolved
+## Implementation Questions
+Things that need to be resolved:
 - A new subclass of Module, CustomTarget, is added to handle targets that have no sources or headers as returned by the TargetSourcesBuilder.
     - It returns a list of "other" files. we add those as sources for the CustomTarget
     - Should other files be added to all targets? Needs more study
 - How do plugins handle builds for multiple platforms?
     - Some of the commands it adds only work on certain platforms, e.g. building the jar files in SDL are only for Android
     - Can we add "when" clauses to the commands?
+- How do we implement cross-platform copy and touch commands?
+    - SwiftBuild already has similar functionality, can we hook it up to CustomTask? or provide alternative \*Tasks?
 ## Examples
 To help confirm we have the desired capability and ergonomics, we'll produce examples in the Examples directory.
 - Simple Java compile, produce jar from classes
