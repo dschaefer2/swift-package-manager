@@ -962,7 +962,20 @@ public final class PackageBuilder {
         let potentialBundleName = self.manifest.displayName + "_" + potentialModule.name
 
         if sources.relativePaths.isEmpty && resources.isEmpty && headers.isEmpty {
-            return nil
+            if manifestTarget.pluginUsages?.isEmpty ?? false {
+                return nil
+            } else {
+                // Target without sources but with plugins -> CustomTarget
+                return CustomTarget(
+                    name: potentialModule.name,
+                    path: potentialModule.path,
+                    sources: .init(paths: others, root: packagePath),
+                    resources: resources,
+                    dependencies: dependencies,
+                    buildSettings: buildSettings,
+                    buildSettingsDescription: manifestTarget.settings
+                )
+            }
         }
         try self.validateSourcesOverlapping(forTarget: potentialModule.name, sources: sources.paths)
 

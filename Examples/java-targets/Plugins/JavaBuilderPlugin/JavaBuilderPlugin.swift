@@ -9,7 +9,7 @@ struct JavaBuilderPlugin: BuildToolPlugin {
             return []
         }
 
-        let sources = sourceTarget.sourceFiles.map { $0.url }
+        let sources = sourceTarget.sourceFiles(withSuffix: ".java").map { $0.url }
 
         let outputTag = context.pluginWorkDirectoryURL.appending(path: ".javaclassdir")
 
