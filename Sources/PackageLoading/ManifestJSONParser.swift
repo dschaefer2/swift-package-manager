@@ -564,8 +564,6 @@ extension TargetDescription.TargetKind {
             self = .plugin
         case .macro:
             self = .macro
-        case .custom:
-            self = .custom
         }
     }
 }

@@ -180,7 +180,6 @@ enum Serialization {
         case binary
         case plugin
         case `macro`
-        case custom
     }
 
     enum PluginCapability: Codable {

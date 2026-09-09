@@ -961,7 +961,7 @@ public final class PackageBuilder {
         // The name of the bundle, if one is being generated.
         let potentialBundleName = self.manifest.displayName + "_" + potentialModule.name
 
-        if sources.relativePaths.isEmpty && resources.isEmpty && headers.isEmpty && potentialModule.type != .custom {
+        if sources.relativePaths.isEmpty && resources.isEmpty && headers.isEmpty {
             return nil
         }
         try self.validateSourcesOverlapping(forTarget: potentialModule.name, sources: sources.paths)
@@ -983,22 +983,6 @@ public final class PackageBuilder {
                 packageAccess: potentialModule.packageAccess
             )
         }
-
-        if potentialModule.type == .custom {
-            // Combine with others
-            let sources = Sources(paths: sources.paths + others, root: sources.root)
-
-            return CustomTarget(
-                name: potentialModule.name,
-                path: potentialModule.path,
-                sources: sources,
-                resources: resources,
-                dependencies: dependencies,
-                buildSettings: .init(),
-                buildSettingsDescription: []
-            )
-        }
-
 
         /// Determine the module's kind, or leave nil to check the source directory.
         let moduleKind: Module.Kind
