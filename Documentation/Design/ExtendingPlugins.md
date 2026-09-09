@@ -66,8 +66,13 @@ Add module type for external executable.
 - Adds the executable to the model.
 
 ## Implementation Notes
+Things that need to be resolved
 - A new subclass of Module, CustomTarget, is added to handle targets that have no sources or headers as returned by the TargetSourcesBuilder.
     - It returns a list of "other" files. we add those as sources for the CustomTarget
+    - Should other files be added to all targets? Needs more study
+- How do plugins handle builds for multiple platforms?
+    - Some of the commands it adds only work on certain platforms, e.g. building the jar files in SDL are only for Android
+    - Can we add "when" clauses to the commands?
 ## Examples
 To help confirm we have the desired capability and ergonomics, we'll produce examples in the Examples directory.
 - Simple Java compile, produce jar from classes
