@@ -317,7 +317,6 @@ public final class SwiftModuleBuildDescription {
             target: target,
             toolsVersion: toolsVersion,
             additionalFileRules: additionalFileRules,
-            buildParameters: self.buildParameters,
             buildToolPluginInvocationResults: buildToolPluginInvocationResults,
             prebuildCommandResults: prebuildCommandResults,
             observabilityScope: observabilityScope

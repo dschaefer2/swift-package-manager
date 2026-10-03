@@ -341,7 +341,6 @@ public final class PIFBuilder {
                             target: module,
                             toolsVersion: package.manifest.toolsVersion,
                             additionalFileRules: self.parameters.additionalFileRules,
-                            buildParameters: buildParameters,
                             buildToolPluginInvocationResults: buildToolPluginResults,
                             prebuildCommandResults: [],
                             observabilityScope: observability.topScope

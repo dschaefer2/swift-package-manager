@@ -17,8 +17,8 @@ import PackageModel
 import struct PackageGraph.ModulesGraph
 import struct PackageGraph.ResolvedModule
 import struct SPMBuildCore.BuildParameters
-import struct SPMBuildCore.BuildToolPluginInvocationResult
-import struct SPMBuildCore.CommandPluginResult
+import struct PackageGraph.BuildToolPluginInvocationResult
+import struct PackageGraph.CommandPluginResult
 import enum SPMBuildCore.WarningControlFlags
 
 @available(*, deprecated, renamed: "ClangModuleBuildDescription")
@@ -175,7 +175,6 @@ public final class ClangModuleBuildDescription {
                 target: target,
                 toolsVersion: toolsVersion,
                 additionalFileRules: additionalFileRules,
-                buildParameters: buildParameters,
                 buildToolPluginInvocationResults: buildToolPluginInvocationResults,
                 prebuildCommandResults: prebuildCommandResults,
                 observabilityScope: observabilityScope

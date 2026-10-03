@@ -11,7 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 import class Basics.InMemoryFileSystem
-import SPMBuildCore
+import PackageGraph
 import Testing
 
 struct XCFrameworkMetadataTests {

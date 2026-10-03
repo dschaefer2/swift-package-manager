@@ -114,8 +114,8 @@ import Build
                 workers: UInt32,
                 observabilityScope: Basics.ObservabilityScope,
                 callbackQueue: DispatchQueue,
-                delegate: any SPMBuildCore.PluginScriptCompilerDelegate,
-                completion: @escaping (Result<SPMBuildCore.PluginCompilationResult, any Error>) -> Void)
+                delegate: any PluginScriptCompilerDelegate,
+                completion: @escaping (Result<PluginCompilationResult, any Error>) -> Void)
             {
                 callbackQueue.sync {
                     completion(.failure(StringError("unimplemented")))
@@ -145,7 +145,7 @@ import Build
                 fileSystem: any Basics.FileSystem,
                 observabilityScope: Basics.ObservabilityScope,
                 callbackQueue: DispatchQueue,
-                delegate: any SPMBuildCore.PluginScriptCompilerDelegate & SPMBuildCore.PluginScriptRunnerDelegate
+                delegate: any PluginScriptCompilerDelegate & PluginScriptRunnerDelegate
             ) async throws -> Int32 {
                 let decoder = JSONDecoder.makeWithDefaults()
                 let encoder = JSONEncoder(outputFormatting: .prettyPrinted)

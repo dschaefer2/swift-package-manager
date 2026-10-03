@@ -12,7 +12,6 @@
 
 import Basics
 import Foundation
-import PackageGraph
 import PackageLoading
 import PackageModel
 import TSCBasic

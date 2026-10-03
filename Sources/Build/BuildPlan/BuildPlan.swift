@@ -801,7 +801,6 @@ extension BuildPlan {
                     target: module,
                     toolsVersion: package.manifest.toolsVersion,
                     additionalFileRules: additionalFileRules,
-                    buildParameters: buildParameters,
                     buildToolPluginInvocationResults: buildToolPluginResults,
                     prebuildCommandResults: [],
                     observabilityScope: observability.topScope

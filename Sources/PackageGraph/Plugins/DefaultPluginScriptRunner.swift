@@ -14,7 +14,6 @@
 import Basics
 
 import Foundation
-import PackageGraph
 import PackageModel
 
 import struct TSCBasic.ByteString

@@ -12,6 +12,7 @@
 
 @_spi(SwiftPMInternal) import Basics
 @_spi(SwiftPMInternal) import SPMBuildCore
+import PackageGraph
 
 public struct PluginConfiguration {
     /// Entity responsible for compiling and running plugin scripts.

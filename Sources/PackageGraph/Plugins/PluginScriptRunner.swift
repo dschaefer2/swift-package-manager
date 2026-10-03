@@ -15,7 +15,6 @@ import _Concurrency
 import Foundation
 import PackageModel
 import PackageLoading
-import PackageGraph
 import TSCBasic
 import TSCUtility
 

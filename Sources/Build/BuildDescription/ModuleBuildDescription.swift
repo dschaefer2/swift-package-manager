@@ -16,7 +16,7 @@ import struct PackageGraph.ResolvedPackage
 import struct PackageGraph.ResolvedProduct
 import struct PackageModel.Resource
 import struct PackageModel.ToolsVersion
-import struct SPMBuildCore.BuildToolPluginInvocationResult
+import struct PackageGraph.BuildToolPluginInvocationResult
 import struct SPMBuildCore.BuildParameters
 import protocol SPMBuildCore.ModuleBuildDescription
 

@@ -16,9 +16,7 @@ import Basics
 import Build
 
 import _InternalTestSupport
-import struct PackageGraph.ModulesGraph
-import struct PackageGraph.ResolvedModule
-import struct PackageGraph.ResolvedProduct
+import PackageGraph
 import PackageModel
 import SPMBuildCore
 import TSCUtility

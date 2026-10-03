@@ -12,7 +12,6 @@
 
 import Basics
 import Foundation
-import PackageGraph
 import PackageModel
 import struct TSCBasic.StringError
 
@@ -147,7 +146,7 @@ extension BinaryModule {
 }
 
 extension Triple {
-    func withoutVersion() throws -> Triple {
+    public func withoutVersion() throws -> Triple {
         if isDarwin() {
             let stringWithoutVersion = tripleString(forPlatformVersion: "")
             return try Triple(stringWithoutVersion)

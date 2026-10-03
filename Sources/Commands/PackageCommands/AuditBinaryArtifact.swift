@@ -15,6 +15,7 @@ import Basics
 import BinarySymbols
 import CoreCommands
 import Foundation
+import PackageGraph
 import PackageModel
 import SPMBuildCore
 import Workspace

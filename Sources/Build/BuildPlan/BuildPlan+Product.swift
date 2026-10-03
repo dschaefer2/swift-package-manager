@@ -25,9 +25,9 @@ import class PackageModel.Module
 import class PackageModel.SwiftModule
 import class PackageModel.SystemLibraryModule
 import struct SPMBuildCore.BuildParameters
-import struct SPMBuildCore.ExecutableInfo
-import struct SPMBuildCore.LibraryInfo
-import struct SPMBuildCore.WindowsDLLInfo
+import struct PackageGraph.ExecutableInfo
+import struct PackageGraph.LibraryInfo
+import struct PackageGraph.WindowsDLLInfo
 import func TSCBasic.topologicalSort
 
 extension BuildPlan {

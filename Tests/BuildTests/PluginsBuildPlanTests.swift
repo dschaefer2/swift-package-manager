@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 import Foundation
 import Basics
+import PackageGraph
 import PackageModel
 import Testing
 import _InternalTestSupport

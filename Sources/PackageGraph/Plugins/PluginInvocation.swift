@@ -17,7 +17,6 @@ import _Concurrency
 import Foundation
 import PackageModel
 import PackageLoading
-import PackageGraph
 
 import struct OrderedCollections.OrderedDictionary
 
@@ -518,7 +517,6 @@ extension ModulesGraph {
         target: ResolvedModule,
         toolsVersion: ToolsVersion,
         additionalFileRules: [FileRuleDescription],
-        buildParameters: BuildParameters,
         buildToolPluginInvocationResults: [BuildToolPluginInvocationResult],
         prebuildCommandResults: [CommandPluginResult],
         observabilityScope: ObservabilityScope
