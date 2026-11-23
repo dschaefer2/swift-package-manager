@@ -16,6 +16,7 @@ import protocol TSCBasic.FileSystem
 
 import enum Basics.Sandbox
 import struct Basics.AbsolutePath
+import struct Basics.RelativePath
 import struct Basics.SourceControlURL
 
 import enum SwiftBuild.ProjectModel
@@ -34,6 +35,8 @@ extension PackagePIFBuilder {
         /// Build commands to incorporate into the dependency graph.
         public let buildCommands: [CustomBuildCommand]
 
+        public let buildProducts: [BuildProduct]
+
         /// Absolute paths of all derived source files that should be compiled as sources of the target.
         /// This includes the outputs of any prebuild commands as well as all the outputs referenced in all the build
         /// commands.
@@ -43,11 +46,19 @@ extension PackagePIFBuilder {
 
         public init(
             prebuildCommandOutputPaths: [AbsolutePath],
-            buildCommands: [CustomBuildCommand]
+            buildCommands: [CustomBuildCommand],
+            buildProducts: [BuildProduct]
         ) {
             self.prebuildCommandOutputPaths = prebuildCommandOutputPaths
             self.buildCommands = buildCommands
+            self.buildProducts = buildProducts
         }
+    }
+
+    public struct BuildProduct: Equatable {
+        public var path: AbsolutePath
+        public var subDir: RelativePath?
+        public var platforms: Set<ProjectModel.PlatformFilter>
     }
 
     /// A command provided by a build tool plugin.
@@ -68,6 +79,9 @@ extension PackagePIFBuilder {
             self.outputPaths.compactMap { try? AbsolutePath(validating: $0) }
         }
 
+        public var alwaysOutOfDate: Bool
+        public var platformFilters: Set<ProjectModel.PlatformFilter>
+
         public var pluginOutputDir: AbsolutePath
 
         public var sandboxProfile: SandboxProfile? = nil
@@ -80,6 +94,8 @@ extension PackagePIFBuilder {
             workingDir: AbsolutePath?,
             inputPaths: [AbsolutePath],
             outputPaths: [String],
+            alwaysOutOfDate: Bool,
+            platformFilters: Set<ProjectModel.PlatformFilter>,
             pluginOutputDir: AbsolutePath,
             sandboxProfile: SandboxProfile?
         ) {
@@ -90,6 +106,8 @@ extension PackagePIFBuilder {
             self.workingDir = workingDir
             self.inputPaths = inputPaths
             self.outputPaths = outputPaths
+            self.alwaysOutOfDate = alwaysOutOfDate
+            self.platformFilters = platformFilters
             self.pluginOutputDir = pluginOutputDir
             self.sandboxProfile = sandboxProfile
         }

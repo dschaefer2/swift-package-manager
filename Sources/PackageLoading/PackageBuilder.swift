@@ -720,9 +720,9 @@ public final class PackageBuilder {
             if let pluginUsages = target.pluginUsages {
                 successors += pluginUsages.compactMap {
                     switch $0 {
-                    case .plugin(_, .some(_)):
+                    case .plugin(_, .some(_), _):
                         nil
-                    case .plugin(let name, nil):
+                    case .plugin(let name, nil, _):
                         if let potentialModule = potentialModuleMap[name] {
                             potentialModule
                         } else if let targetName = pluginTargetName(for: name),
@@ -795,17 +795,20 @@ public final class PackageBuilder {
             } ?? []
 
             // Get dependencies from the plugin usages of this target.
-            let pluginUsages: [Module.PluginUsage] = manifestTarget?.pluginUsages.map {
+            let pluginUsages: [(Module.PluginUsage, [Module.PluginSetting]?)] = manifestTarget?.pluginUsages.map {
                 $0.compactMap { usage in
                     switch usage {
-                    case .plugin(let name, let package):
+                    case .plugin(let name, let package, let settings):
+                        let pluginSettings: [Module.PluginSetting]? = settings?.map {
+                            .init(name: $0.name, value: $0.values, conditions: self.buildConditions(from: $0.condition))
+                        }
                         if let package {
-                            return .product(Module.ProductReference(name: name, package: package), conditions: [])
+                            return (Module.Dependency.product(Module.ProductReference(name: name, package: package), conditions: []), pluginSettings)
                         } else {
                             if let target = targets[name] {
-                                return .module(target, conditions: [])
+                                return (Module.Dependency.module(target, conditions: []), pluginSettings)
                             } else if let targetName = pluginTargetName(for: name), let target = targets[targetName] {
-                                return .module(target, conditions: [])
+                                return (Module.Dependency.module(target, conditions: []), pluginSettings)
                             } else {
                                 self.observabilityScope.emit(.pluginNotFound(name: name))
                                 return nil
@@ -815,11 +818,18 @@ public final class PackageBuilder {
                 }
             } ?? []
 
+            let pluginSettings: [Module.Dependency.ID: [Module.PluginSetting]] = pluginUsages.reduce(into: [:], {
+                if let settings = $1.1 {
+                    $0[$1.0.id] = settings
+                }
+            })
+
             // Create the target, adding the inferred dependencies from plugin usages to the declared dependencies.
             let target = try createTarget(
                 potentialModule: potentialModule,
                 manifestTarget: manifestTarget,
-                dependencies: dependencies + pluginUsages
+                dependencies: dependencies + pluginUsages.map { $0.0 },
+                pluginSettings: pluginSettings
             )
             // Add the created target to the map or print no sources warning.
             if let createdTarget = target {
@@ -869,7 +879,8 @@ public final class PackageBuilder {
     private func createTarget(
         potentialModule: PotentialModule,
         manifestTarget: TargetDescription?,
-        dependencies: [Module.Dependency]
+        dependencies: [Module.Dependency],
+        pluginSettings: [Module.Dependency.ID: [Module.PluginSetting]]
     ) throws -> Module? {
         guard let manifestTarget else { return nil }
 
@@ -949,6 +960,16 @@ public final class PackageBuilder {
             cxxLanguageStandard: self.manifest.cxxLanguageStandard,
             toolsSwiftVersion: self.toolsSwiftVersion()
         )
+
+        if potentialModule.type == .custom {
+           return CustomTarget(
+               name: potentialModule.name,
+               path: potentialModule.path,
+               dependencies: dependencies,
+               buildSettings: buildSettings,
+               buildSettingsDescription: manifestTarget.settings
+           )
+        }
 
         // Compute the path to public headers directory.
         let publicHeaderComponent = manifestTarget.publicHeadersPath ?? ClangModule.defaultPublicHeadersComponent
@@ -1070,9 +1091,10 @@ public final class PackageBuilder {
                 clangModuleInfo: clangModuleInfo,
                 buildSettings: buildSettings,
                 buildSettingsDescription: manifestTarget.settings,
+                pluginSettings: pluginSettings,
                 // unsafe flags check disabled in 6.2
                 usesUnsafeFlags: manifest.toolsVersion >= .v6_2 ? false : manifestTarget.usesUnsafeFlags,
-                implicit: false
+                implicit: false,
             )
         } else {
             // It's not a Swift target, so it's a Clang target (those are the only two types of source target currently
@@ -1288,7 +1310,7 @@ public final class PackageBuilder {
 
                 switch setting.tool {
                 case .linker:
-                    decl = .LIBRARY_SEARCH_PATH
+                    decl = .LIBRARY_SEARCH_PATHS
                 case .c, .cxx, .swift:
                     throw InternalError("unexpected tool for setting type \(setting)")
                 }
@@ -1314,7 +1336,7 @@ public final class PackageBuilder {
 
                 switch setting.tool {
                 case .linker:
-                    decl = .FRAMEWORK_SEARCH_PATH
+                    decl = .FRAMEWORK_SEARCH_PATHS
                 case .c, .cxx, .swift:
                     throw InternalError("unexpected tool for setting type \(setting)")
                 }

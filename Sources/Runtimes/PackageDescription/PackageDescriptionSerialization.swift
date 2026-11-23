@@ -187,6 +187,7 @@ enum Serialization {
         case binary
         case plugin
         case `macro`
+        case custom
     }
 
     enum PluginCapability: Codable {
@@ -213,8 +214,14 @@ enum Serialization {
         case unixDomainSocket
     }
 
+    struct PluginSetting: Codable {
+        let name: String
+        let values: [String]
+        let condition: BuildSettingCondition?
+    }
+
     enum PluginUsage: Codable {
-        case plugin(name: String, package: String?)
+        case plugin(name: String, package: String?, settings: [PluginSetting]?)
     }
 
     struct Target: Codable {

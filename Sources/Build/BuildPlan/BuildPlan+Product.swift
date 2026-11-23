@@ -328,7 +328,7 @@ extension BuildPlan {
                     }
                 case .plugin:
                     continue
-                case .prebuilt:
+                case .prebuilt, .custom:
                     continue
                 }
 

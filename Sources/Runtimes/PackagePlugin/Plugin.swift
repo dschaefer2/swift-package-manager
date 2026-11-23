@@ -125,7 +125,8 @@ extension Plugin {
         pluginHostConnection = PluginHostConnection(
             inputStream: FileHandle(fileDescriptor: inputFD),
             outputStream: FileHandle(fileDescriptor: outputFD))
-        
+
+
         // Handle messages from the host until the input stream is closed,
         // indicating that we're done.
         while let message = try pluginHostConnection.waitForNextMessage() {
@@ -167,6 +168,7 @@ extension Plugin {
                     package: package,
                     pluginWorkDirectory: Path(url: pluginWorkDirectory),
                     pluginWorkDirectoryURL: pluginWorkDirectory,
+                    pluginSettings: wireInput.pluginSettings.map { .init(setting: $0) },
                     accessibleTools: accessibleTools,
                     toolSearchDirectories: toolSearchDirectories.map { try Path(url: $0) },
                     toolSearchDirectoryURLs: toolSearchDirectories)
@@ -183,6 +185,8 @@ extension Plugin {
                 internalError("Couldn’t deserialize input from host: \(error).")
             }
 
+            let pluginSettings: [PluginSetting] = wireInput.pluginSettings.map { .init(setting: $0) }
+
             // Instantiate the plugin. For now there are no parameters, but
             // this is where we would set them up, most likely as properties
             // of the plugin instance (similar to how SwiftArgumentParser
@@ -197,20 +201,40 @@ extension Plugin {
             guard let plugin = plugin as? BuildToolPlugin else {
                 throw PluginDeserializationError.missingBuildToolPluginProtocolConformance(protocolName: "BuildToolPlugin")
             }
-            
+
             // Invoke the plugin to create build commands for the target.
-            let generatedCommands = try await plugin.createBuildCommands(context: context, target: target)
-            
+            let generatedCommands = try await plugin.createBuildCommands(context: context, target: target, pluginSettings: pluginSettings)
+
             // Send each of the generated commands to the host.
             for command in generatedCommands {
                 switch command {
 
-                case .buildSettings(let cSettings, let cxxSettings):
-                    let settings: [PluginToHostMessage.BuildSetting] = cSettings.map({ .init(data: $0.data) }) + cxxSettings.map({ .init(data: $0.data) })
-                    let message = PluginToHostMessage.defineSettings(settings: settings)
+                case .targetInfo(let cSettings, let cxxSettings, let linkerSettings, let targetSettings, let buildProducts):
+                    let buildSettings: [PluginMessage.BuildSetting] = cSettings.map { .init(data: $0.data) }
+                        + cxxSettings.map { .init(data: $0.data) }
+                        + linkerSettings.map { .init(data: $0.data) }
+                    let targetSettings: [PluginMessage.Setting] = targetSettings.map {
+                        .init(
+                            name: $0.name,
+                            value: $0.value,
+                            condition: $0.condition.map { .init(condition: $0) }
+                        )
+                    }
+                    let buildProducts: [PluginToHostMessage.BuildProduct] = buildProducts.map {
+                        .init(
+                            url: $0.url,
+                            subDir: $0.subDir,
+                            condition: $0.condition.map{ .init(condition: $0) }
+                        )
+                    }
+                    let message = PluginToHostMessage.defineTargetInfo(
+                        buildSettings: buildSettings,
+                        targetSettings: targetSettings,
+                        buildProducts: buildProducts
+                    )
                     try pluginHostConnection.sendMessage(message)
 
-                case .buildCommand(let displayName, let executable, let arguments, let environment, let inputFiles, let outputFiles):
+                case .buildCommand(let displayName, let executable, let arguments, let environment, let inputFiles, let outputFiles, let alwaysOutOfData, let condition):
                     let command = PluginToHostMessage.CommandConfiguration(
                         displayName: displayName,
                         executable: executable,
@@ -221,7 +245,9 @@ extension Plugin {
                     let message = PluginToHostMessage.defineBuildCommand(
                         configuration: command,
                         inputFiles: inputFiles,
-                        outputFiles: outputFiles
+                        outputFiles: outputFiles,
+                        alwaysOutOfData: alwaysOutOfData,
+                        condition: condition.map { .init(condition: $0) }
                     )
                     try pluginHostConnection.sendMessage(message)
 
@@ -292,12 +318,32 @@ extension Plugin {
             for command in record.generatedCommands {
                 switch command {
 
-                case .buildSettings(let cSettings, let cxxSettings):
-                    let settings: [PluginToHostMessage.BuildSetting] = cSettings.map({ .init(data: $0.data) }) + cxxSettings.map({ .init(data: $0.data) })
-                    let message = PluginToHostMessage.defineSettings(settings: settings)
+                case .targetInfo(let cSettings, let cxxSettings, let linkerSettings, let targetSettings, let buildProducts):
+                    let buildSettings: [PluginMessage.BuildSetting] = cSettings.map { .init(data: $0.data) }
+                        + cxxSettings.map { .init(data: $0.data) }
+                        + linkerSettings.map { .init(data: $0.data) }
+                    let targetSettings: [PluginMessage.Setting] = targetSettings.map {
+                        .init(
+                            name: $0.name,
+                            value: $0.value,
+                            condition: $0.condition.map { .init(condition: $0) }
+                        )
+                    }
+                    let buildProducts: [PluginToHostMessage.BuildProduct] = buildProducts.map {
+                        .init(
+                            url: $0.url,
+                            subDir: $0.subDir,
+                            condition: $0.condition.map{ .init(condition: $0) }
+                        )
+                    }
+                    let message = PluginToHostMessage.defineTargetInfo(
+                        buildSettings: buildSettings,
+                        targetSettings: targetSettings,
+                        buildProducts: buildProducts
+                    )
                     try pluginHostConnection.sendMessage(message)
 
-                case let .buildCommand(name, exec, args, env, inputs, outputs):
+                case let .buildCommand(name, exec, args, env, inputs, outputs, alwaysOutOfData, condition):
                     let command = PluginToHostMessage.CommandConfiguration(
                         displayName: name,
                         executable: exec,
@@ -307,7 +353,10 @@ extension Plugin {
                     let message = PluginToHostMessage.defineBuildCommand(
                         configuration: command,
                         inputFiles: inputs,
-                        outputFiles: outputs)
+                        outputFiles: outputs,
+                        alwaysOutOfData: alwaysOutOfData,
+                        condition: condition.map { .init(condition: $0) }
+                    )
                     try pluginHostConnection.sendMessage(message)
                     
                 case let .prebuildCommand(name, exec, args, env, outdir):
@@ -346,6 +395,7 @@ extension Plugin {
                     package: package,
                     pluginWorkDirectory: Path(url: pluginWorkDirectory),
                     pluginWorkDirectoryURL: pluginWorkDirectory,
+                    pluginSettings: wireInput.pluginSettings.map { .init(setting: $0) },
                     accessibleTools: accessibleTools,
                     toolSearchDirectories: toolSearchDirectories.map { try Path(url: $0) },
                     toolSearchDirectoryURLs: toolSearchDirectories)
@@ -654,7 +704,7 @@ fileprivate struct LibraryHandle: @unchecked Sendable {
     }
 }
 
-extension PluginToHostMessage.BuildSetting {
+extension PluginMessage.BuildSetting {
     init(data: BuildSettingData) {
         self.name = data.name
         self.value = data.value
@@ -663,7 +713,7 @@ extension PluginToHostMessage.BuildSetting {
     }
 }
 
-extension PluginToHostMessage.BuildSettingUsage {
+extension PluginMessage.BuildSettingUsage {
     init(usage: BuildSettingUsage) {
         self = switch usage {
         case .public:
@@ -676,9 +726,30 @@ extension PluginToHostMessage.BuildSettingUsage {
     }
 }
 
-extension PluginToHostMessage.BuildSettingCondition {
+extension PluginMessage.BuildSettingCondition {
     init(condition: BuildSettingCondition) {
         self.platforms = condition.platforms?.map { .init(name: $0.name) }
         self.config = condition.config.map { .init(config: $0.config) }
+    }
+}
+
+extension PluginToHostMessage.CommandCondition {
+    init(condition: CommandCondition) {
+        self.platforms = condition.platforms?.map { .init(name: $0.name) }
+    }
+}
+
+extension PluginSetting {
+    init(setting: PluginMessage.Setting) {
+        self.init(
+            name: setting.name,
+            value: setting.value,
+            condition: setting.condition.map {
+                .init(
+                    platforms: $0.platforms?.map { .init(name: $0.name) },
+                    config: $0.config.map { .init($0.config) }
+                )
+            }
+        )
     }
 }

@@ -252,6 +252,7 @@ extension Serialization.TargetType {
         case .binary: self = .binary
         case .plugin: self = .plugin
         case .macro: self = .macro
+        case .custom: self = .custom
         }
     }
 }
@@ -302,10 +303,21 @@ extension Serialization.PluginNetworkPermissionScope {
     }
 }
 
+extension Serialization.PluginSetting {
+    init(_ setting: PackageDescription.Target.PluginSetting) {
+        self.name = setting.name
+        self.values = setting.value
+        self.condition = setting.condition.map { .init($0) }
+    }
+}
+
 extension Serialization.PluginUsage {
     init(_ usage: PackageDescription.Target.PluginUsage) {
         switch usage {
-        case .plugin(let name, let package): self = .plugin(name: name, package: package)
+        case .pluginWithSettings(name: let name, package: let package, settings: let settings):
+            self = .plugin(name: name, package: package, settings: settings?.map { .init($0) })
+        case .plugin(name: let name, package: let package):
+            self = .plugin(name: name, package: package, settings: nil)
         }
     }
 }

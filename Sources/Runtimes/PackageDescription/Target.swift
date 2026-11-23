@@ -39,6 +39,8 @@ public final class Target {
         case plugin
         /// A target that provides a Swift macro.
         case `macro`
+        /// A custom target whose build is managed by plugins
+        case custom
     }
 
     /// The different types of a target's dependency on another entity.
@@ -200,7 +202,7 @@ public final class Target {
     /// The target's linker settings.
     @available(_PackageDescription, introduced: 5)
     public var linkerSettings: [LinkerSetting]?
- 
+
     /// The checksum for the archive file that contains the referenced binary
     /// artifact.
     ///
@@ -217,7 +219,14 @@ public final class Target {
     /// The uses of package plug-ins by the target.
     @available(_PackageDescription, introduced: 5.5)
     public var plugins: [PluginUsage]?
-    
+
+    @available(_PackageDescription, introduced: 999.0)
+    public struct PluginSetting {
+        var name: String
+        var value: [String]
+        var condition: BuildSettingCondition?
+    }
+
     /// A plug-in used in a target.
     @available(_PackageDescription, introduced: 5.5)
     public enum PluginUsage {
@@ -226,7 +235,16 @@ public final class Target {
         /// - Parameters:
         ///   - name: The name of the plug-in target.
         ///   - package: The name of the package that defines the plug-in target.
+        @available(_PackageDescription, introduced: 5.5)
         case plugin(name: String, package: String?)
+
+        /// Specifies the use of a plug-in with settings.
+        ///
+        /// This case has a distinct base name because Swift can't disambiguate
+        /// overloaded enum case names in patterns. Use
+        /// ``plugin(name:package:settings:)`` to construct it.
+        @available(_PackageDescription, introduced: 999.0)
+        case pluginWithSettings(name: String, package: String?, settings: [PluginSetting]?)
     }
 
     /// Construct a target.
@@ -330,6 +348,13 @@ public final class Target {
         case .macro:
             precondition(
                 url == nil &&
+                resources == nil &&
+                pkgConfig == nil &&
+                providers == nil &&
+                pluginCapability == nil
+            )
+        case .custom:
+            precondition(
                 resources == nil &&
                 pkgConfig == nil &&
                 providers == nil &&
@@ -1289,6 +1314,34 @@ public final class Target {
             packageAccess: packageAccess,
             pluginCapability: capability)
     }
+
+    @available(_PackageDescription, introduced: 999.0)
+    public static func custom(
+        name: String,
+        dependencies: [Dependency] = [],
+        path: String,
+        cSettings: [CSetting]? = nil,
+        cxxSettings: [CXXSetting]? = nil,
+        swiftSettings: [SwiftSetting]? = nil,
+        linkerSettings: [LinkerSetting]? = nil,
+        plugins: [PluginUsage]? = nil
+    ) -> Target {
+        return Target(
+            name: name,
+            dependencies: dependencies,
+            path: path,
+            exclude: [],
+            sources: nil,
+            publicHeadersPath: nil,
+            type: .custom,
+            packageAccess: true,
+            cSettings: cSettings,
+            cxxSettings: cxxSettings,
+            swiftSettings: swiftSettings,
+            linkerSettings: linkerSettings,
+            plugins: plugins
+        )
+    }
 }
 
 extension Target.Dependency {
@@ -1588,8 +1641,22 @@ extension Target.PluginUsage {
     public static func plugin(name: String) -> Target.PluginUsage {
         return .plugin(name: name, package: nil)
     }
+
+    @available(_PackageDescription, introduced: 999.0)
+    public static func plugin(name: String, package: String? = nil, settings: [Target.PluginSetting]) -> Target.PluginUsage {
+        return .pluginWithSettings(name: name, package: package, settings: settings)
+    }
 }
 
+extension Target.PluginSetting {
+    public static func setting(name: String, value: String, _ condition: BuildSettingCondition? = nil) -> Target.PluginSetting {
+        return .init(name: name, value: [value], condition: condition)
+    }
+
+    public static func setting(name: String, values: [String], _ condition: BuildSettingCondition? = nil) -> Target.PluginSetting {
+        return .init(name: name, value: values, condition: condition)
+    }
+}
 
 // MARK: ExpressibleByStringLiteral
 

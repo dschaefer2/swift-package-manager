@@ -225,6 +225,9 @@ public protocol Target {
     ///
     /// Conditional dependencies that do not apply are filtered out.
     var dependencies: [TargetDependency] { get }
+
+    /// Settings that the targets plugins have added to the target.
+    var targetSettings: [TargetSetting] { get }
 }
 
 /// A dependency of a target on a product or on another target.
@@ -342,6 +345,8 @@ public struct SwiftSourceModuleTarget: SourceModuleTarget {
     /// Conditional dependencies that do not apply have already been filtered out.
     public let dependencies: [TargetDependency]
 
+    public let targetSettings: [TargetSetting]
+
     /// The name of the module produced by the target.
     ///
     /// This is derived from the target name, though future Swift package manager
@@ -419,6 +424,8 @@ public struct ClangSourceModuleTarget: SourceModuleTarget {
     /// Conditional dependencies that do not apply have already been filtered out.
     public let dependencies: [TargetDependency]
 
+    public let targetSettings: [TargetSetting]
+
     /// The name of the module produced by the target.
     ///
     /// This is derived from the target name, though future Swift package manager
@@ -482,6 +489,7 @@ internal struct ConcreteSourceModuleTarget: SourceModuleTarget {
     let directory: Path
     let directoryURL: URL
     let dependencies: [TargetDependency]
+    let targetSettings: [TargetSetting]
     let moduleName: String
     let sourceFiles: FileList
     let swiftCompilationConditions: [String]
@@ -519,6 +527,8 @@ public struct BinaryArtifactTarget: Target {
     ///
     /// Conditional dependencies that do not apply have already been filtered out.
     public let dependencies: [TargetDependency]
+
+    public let targetSettings: [TargetSetting]
 
     /// The kind of binary artifact.
     public let kind: Kind
@@ -577,6 +587,8 @@ public struct SystemLibraryTarget: Target {
     /// Conditional dependencies that do not apply have already been filtered out.
     public var dependencies: [TargetDependency]
 
+    public let targetSettings: [TargetSetting]
+
     /// The name of the `pkg-config` file, if any, describing the library.
     public let pkgConfig: String?
 
@@ -587,6 +599,16 @@ public struct SystemLibraryTarget: Target {
 
     /// Flags from `pkg-config` to pass to the platform linker.
     public let linkerFlags: [String]
+}
+
+@available(_PackageDescription, introduced: 999.0)
+public struct CustomTarget: Target {
+    public let id: ID
+    public let name: String
+    public let directory: Path
+    public let directoryURL: URL
+    public let dependencies: [TargetDependency]
+    public let targetSettings: [TargetSetting]
 }
 
 /// Provides information about a list of files.

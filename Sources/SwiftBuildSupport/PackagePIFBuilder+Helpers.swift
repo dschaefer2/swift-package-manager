@@ -258,7 +258,7 @@ extension PackageModel.Module {
         switch self.type {
         case .executable, .snippet:
             true
-        case .library, .test, .macro, .systemModule, .plugin, .binary, .prebuilt:
+        case .library, .test, .macro, .systemModule, .plugin, .binary, .prebuilt, .custom:
             false
         }
     }
@@ -267,7 +267,7 @@ extension PackageModel.Module {
         switch self.type {
         case .binary:
             true
-        case .library, .executable, .snippet, .test, .plugin, .macro, .systemModule, .prebuilt:
+        case .library, .executable, .snippet, .test, .plugin, .macro, .systemModule, .prebuilt, .custom:
             false
         }
     }
@@ -277,7 +277,7 @@ extension PackageModel.Module {
         switch self.type {
         case .library, .executable, .snippet, .test, .macro:
             true
-        case .systemModule, .plugin, .binary, .prebuilt:
+        case .systemModule, .plugin, .binary, .prebuilt, .custom:
             false
         }
     }
@@ -383,11 +383,12 @@ extension PackageModel.BuildSettings.Declaration {
             false
 
         // C family.
-        case .GCC_PREPROCESSOR_DEFINITIONS, .HEADER_SEARCH_PATHS, .OTHER_CFLAGS, .OTHER_CPLUSPLUSFLAGS:
+        case .GCC_PREPROCESSOR_DEFINITIONS, .HEADER_SEARCH_PATHS, .ABSOLUTE_HEADER_SEARCH_PATHS, .OTHER_CFLAGS, .OTHER_CPLUSPLUSFLAGS:
             true
 
         // Linker.
-        case .OTHER_LDFLAGS, .LINK_LIBRARIES, .LINK_FRAMEWORKS, .LIBRARY_SEARCH_PATH, .FRAMEWORK_SEARCH_PATH:
+        case .OTHER_LDFLAGS, .LINK_LIBRARIES, .LINK_FRAMEWORKS, .LIBRARY_SEARCH_PATHS, .ABSOLUTE_LIBRARY_SEARCH_PATHS,
+                .FRAMEWORK_SEARCH_PATHS, .ABSOLUTE_FRAMEWORK_SEARCH_PATHS:
             true
 
         default:
@@ -745,14 +746,22 @@ extension PackageGraph.ResolvedModule {
                     singleValueSetting = nil
                     multipleValueSetting = .OTHER_LDFLAGS
                     values = settingAssignment.values.map { "-l\($0)" }
-                case .LIBRARY_SEARCH_PATH:
+                case .LIBRARY_SEARCH_PATHS:
                     singleValueSetting = nil
                     multipleValueSetting = .OTHER_LDFLAGS
                     values = try settingAssignment.values.flatMap { ["-L", try self.sourceDirAbsolutePath.appending(.init(validating: $0)).pathString] }
-                case .FRAMEWORK_SEARCH_PATH:
+                case .ABSOLUTE_LIBRARY_SEARCH_PATHS:
+                    singleValueSetting = nil
+                    multipleValueSetting = .OTHER_LDFLAGS
+                    values = settingAssignment.values.flatMap { ["-L", $0] }
+                case .FRAMEWORK_SEARCH_PATHS:
                     singleValueSetting = nil
                     multipleValueSetting = .OTHER_LDFLAGS
                     values = try settingAssignment.values.flatMap { ["-F", try self.sourceDirAbsolutePath.appending(.init(validating: $0)).pathString] }
+                case .ABSOLUTE_FRAMEWORK_SEARCH_PATHS:
+                    singleValueSetting = nil
+                    multipleValueSetting = .OTHER_LDFLAGS
+                    values = settingAssignment.values.flatMap { ["-F", $0] }
                 case .HEADER_SEARCH_PATHS:
                     singleValueSetting = nil
                     multipleValueSetting = .HEADER_SEARCH_PATHS

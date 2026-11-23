@@ -112,7 +112,7 @@ public final class ClangModule: Module {
             packageAccess: false,
             buildSettings: buildSettings,
             buildSettingsDescription: buildSettingsDescription,
-            pluginUsages: [],
+            pluginSettings: [:],
             usesUnsafeFlags: usesUnsafeFlags,
             implicit: implicit
         )

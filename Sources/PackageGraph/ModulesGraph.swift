@@ -409,7 +409,7 @@ enum GraphError: Error {
 ///
 /// - Complexity: O(v + e) where (v, e) are the number of vertices and edges
 /// reachable from the input nodes via the relation.
-func topologicalSortIdentifiable<T: Identifiable>(
+public func topologicalSortIdentifiable<T: Identifiable>(
     _ nodes: [T], successors: (T) throws -> [T]
 ) throws -> [T] {
     // Implements a topological sort via recursion and reverse postorder DFS.

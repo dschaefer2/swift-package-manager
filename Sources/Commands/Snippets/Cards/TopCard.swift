@@ -184,6 +184,8 @@ fileprivate extension Module.Kind {
             return "macros"
         case .prebuilt:
             return "prebuilts"
+        case .custom:
+            return "custom"
         }
     }
 }

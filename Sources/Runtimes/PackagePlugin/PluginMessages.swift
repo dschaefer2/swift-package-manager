@@ -47,6 +47,7 @@ enum HostToPluginMessage: Codable {
             let xcodeTargets: [XcodeTarget]
             let xcodeProjects: [XcodeProject]
             let pluginWorkDirId: URL.Id
+            let pluginSettings: [PluginMessage.Setting]
             let toolSearchDirIds: [URL.Id]
             let accessibleTools: [String: Tool]
 
@@ -135,6 +136,7 @@ enum HostToPluginMessage: Codable {
                 let name: String
                 let directoryId: URL.Id
                 let dependencies: [Dependency]
+                let targetSettings: [PluginMessage.Setting]
                 let info: TargetInfo
 
                 /// A dependency on either a target or a product in the wire structure.
@@ -188,6 +190,8 @@ enum HostToPluginMessage: Codable {
                         compilerFlags: [String],
                         linkerFlags: [String])
 
+                    case customTargetInfo
+
                     enum SourceModuleKind: String, Codable {
                         case generic
                         case executable
@@ -207,7 +211,7 @@ enum HostToPluginMessage: Codable {
                     }
                 }
             }
-            
+
             /// A typed file in the wire structure. All references to other entities are
             /// their ID numbers.
             struct File: Codable {
@@ -350,7 +354,11 @@ enum PluginToHostMessage: Codable {
     case emitProgress(message: String)
 
     /// The plugin defines a build command.
-    case defineBuildCommand(configuration: CommandConfiguration, inputFiles: [URL], outputFiles: [URL])
+    case defineBuildCommand(configuration: CommandConfiguration, inputFiles: [URL], outputFiles: [URL], alwaysOutOfData: Bool, condition: CommandCondition?)
+
+        struct CommandCondition: Codable {
+            let platforms: [PluginMessage.Platform]?
+        }
 
     /// The plugin defines a prebuild command.
     case definePrebuildCommand(configuration: CommandConfiguration, outputFilesDirectory: URL)
@@ -364,32 +372,12 @@ enum PluginToHostMessage: Codable {
             var workingDirectory: URL?
         }
 
-    case defineSettings(settings: [BuildSetting])
+    case defineTargetInfo(buildSettings: [PluginMessage.BuildSetting], targetSettings: [PluginMessage.Setting], buildProducts: [BuildProduct])
 
-        struct Platform: Codable {
-            let name: String
-        }
-
-        struct BuildConfiguration: Codable {
-            let config: String
-        }
-
-        struct BuildSettingCondition: Codable {
-            let platforms: [Platform]?
-            let config: BuildConfiguration?
-        }
-
-        enum BuildSettingUsage: Codable {
-            case `private`
-            case `public`
-            case interface
-        }
-
-        struct BuildSetting: Codable {
-            let name: String
-            let value: [String]
-            let usage: BuildSettingUsage?
-            let condition: BuildSettingCondition?
+        struct BuildProduct: Codable {
+            let url: URL
+            let subDir: String?
+            let condition: PluginMessage.BuildSettingCondition?
         }
 
     /// The plugin is requesting that a build operation be run.
@@ -442,4 +430,47 @@ enum PluginToHostMessage: Codable {
             var includeSPI: Bool
             var emitExtensionBlocks: Bool
         }
+}
+
+enum PluginMessage {
+    struct Platform: Codable {
+        let name: String
+    }
+
+    struct BuildConfiguration: Codable {
+        let config: String
+
+        init(config: String) {
+            self.config = config
+        }
+    }
+
+    struct BuildSettingCondition: Codable {
+        let platforms: [Platform]?
+        let config: BuildConfiguration?
+
+        init(platforms: [Platform]?, config: BuildConfiguration?) {
+            self.platforms = platforms
+            self.config = config
+        }
+    }
+
+    enum BuildSettingUsage: Codable {
+        case `private`
+        case `public`
+        case interface
+    }
+
+    struct BuildSetting: Codable {
+        let name: String
+        let value: [String]
+        let usage: BuildSettingUsage?
+        let condition: BuildSettingCondition?
+    }
+
+    struct Setting: Codable {
+        let name: String
+        let value: [String]
+        let condition: BuildSettingCondition?
+    }
 }

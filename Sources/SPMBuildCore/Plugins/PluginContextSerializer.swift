@@ -188,7 +188,10 @@ internal struct PluginContextSerializer {
                 kind: artifactKind,
                 origin: artifactOrigin,
                 artifactId: try serialize(path: target.artifactPath))
-            
+
+        case _ as CustomTarget:
+            targetInfo = .customTargetInfo
+
         default:
             // It's not a type of target that we pass through to the plugin.
             return nil
@@ -204,12 +207,21 @@ internal struct PluginContextSerializer {
             }
         }
 
+        let targetSettings: [PluginMessage.Setting] = target.underlying.targetSettings.map {
+            .init(
+                name: $0.name,
+                value: $0.value,
+                condition: .init(conditions: $0.conditions)
+            )
+        }
+
         // Finally assign the next wire ID to the target, and append a serialized Target record.
         let id = targets.count
         targets.append(.init(
             name: target.name,
             directoryId: try serialize(path: target.sources.root),
             dependencies: dependencies,
+            targetSettings: targetSettings,
             info: targetInfo))
         targetsToWireIDs[target.id] = id
         return id
@@ -366,7 +378,7 @@ fileprivate extension WireInput.Target.TargetInfo.SourceModuleKind {
             self = .test
         case .macro:
             self = .macro
-        case .binary, .plugin, .systemModule, .prebuilt:
+        case .binary, .plugin, .systemModule, .prebuilt, .custom:
             throw StringError("unexpected target kind \(kind) for source module")
         }
     }

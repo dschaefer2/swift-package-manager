@@ -24,6 +24,7 @@ public struct TargetDescription: Hashable, Encodable, Sendable {
         case binary
         case plugin
         case `macro`
+        case custom
     }
 
     /// Represents a target's dependency on another entity.
@@ -208,9 +209,21 @@ public struct TargetDescription: Hashable, Encodable, Sendable {
     /// The usages of package plugins by the target.
     public let pluginUsages: [PluginUsage]?
 
+    public struct PluginSetting: Hashable, Codable, Sendable {
+        public var name: String
+        public var values: [String]
+        public var condition: PackageConditionDescription?
+
+        public init(name: String, values: [String], condition: PackageConditionDescription?) {
+            self.name = name
+            self.values = values
+            self.condition = condition
+        }
+    }
+
     /// Represents a target's usage of a plugin target or product.
     public enum PluginUsage: Hashable, Sendable {
-        case plugin(name: String, package: String?)
+        case plugin(name: String, package: String?, settings: [PluginSetting]?)
     }
 
     public init(
@@ -457,6 +470,31 @@ public struct TargetDescription: Hashable, Encodable, Sendable {
                 propertyName: "pluginCapability",
                 value: String(describing: pluginCapability!)
             ) }
+        case .custom:
+            if !resources.isEmpty { throw Error.disallowedPropertyInTarget(
+                targetName: name,
+                targetType: targetType,
+                propertyName: "resources",
+                value: String(describing: resources)
+            ) }
+            if pkgConfig != nil { throw Error.disallowedPropertyInTarget(
+                targetName: name,
+                targetType: targetType,
+                propertyName: "pkgConfig",
+                value: pkgConfig ?? "<nil>"
+            ) }
+            if providers != nil { throw Error.disallowedPropertyInTarget(
+                targetName: name,
+                targetType: targetType,
+                propertyName: "providers",
+                value: String(describing: providers!)
+            ) }
+            if pluginCapability != nil { throw Error.disallowedPropertyInTarget(
+                targetName: name,
+                targetType: targetType,
+                propertyName: "pluginCapability",
+                value: String(describing: pluginCapability!)
+            ) }
         }
 
         // ensure that settings and settings presense detection are consistent
@@ -616,10 +654,11 @@ extension TargetDescription.PluginUsage: Codable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case let .plugin(name, package):
+        case let .plugin(name, package, settings):
             var unkeyedContainer = container.nestedUnkeyedContainer(forKey: .plugin)
             try unkeyedContainer.encode(name)
             try unkeyedContainer.encode(package)
+            try unkeyedContainer.encode(settings)
         }
     }
 
@@ -633,7 +672,8 @@ extension TargetDescription.PluginUsage: Codable {
             var unkeyedValues = try values.nestedUnkeyedContainer(forKey: key)
             let name = try unkeyedValues.decode(String.self)
             let package = try unkeyedValues.decodeIfPresent(String.self)
-            self = .plugin(name: name, package: package)
+            let settings = try unkeyedValues.decodeIfPresent([TargetDescription.PluginSetting].self)
+            self = .plugin(name: name, package: package, settings: settings)
         }
     }
 }

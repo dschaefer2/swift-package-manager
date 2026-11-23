@@ -51,14 +51,19 @@ public enum Command {
         arguments: [String],
         environment: [String: String] = [:],
         inputFiles: [URL] = [],
-        outputFiles: [URL] = []
+        outputFiles: [URL] = [],
+        alwaysOutOfDate: Bool = false,
+        condition: CommandCondition? = nil
     )
 
-    /// Returns a set of build settings to be applied to the target.
+    /// Returns a set of build settings and products to be applied to the target.
     @available(_PackageDescription, introduced: 999.0)
-    case buildSettings(
+    case targetInfo(
         cSettings: [CSetting] = [],
-        cxxSettings: [CXXSetting] = []
+        cxxSettings: [CXXSetting] = [],
+        linkerSettings: [LinkerSetting] = [],
+        targetSettings: [TargetSetting] = [],
+        buildProducts: [BuildProduct] = []
     )
 
     /// Returns a command that runs unconditionally before every build.
@@ -96,6 +101,28 @@ public enum Command {
 }
 
 extension Command {
+    public static func buildCommand(
+        displayName: String?,
+        executable: URL,
+        arguments: [CustomStringConvertible],
+        environment: [String: CustomStringConvertible] = [:],
+        inputFiles: [URL] = [],
+        outputFiles: [URL] = [],
+        alwaysOutOfDate: Bool = false,
+        _ condition: CommandCondition? = nil
+    ) -> Command {
+        self.buildCommand(
+            displayName: displayName,
+            executable: executable,
+            arguments: arguments.map(\.description),
+            environment: environment.mapValues { $0.description },
+            inputFiles: inputFiles,
+            outputFiles: outputFiles,
+            alwaysOutOfDate: alwaysOutOfDate,
+            condition: condition
+        )
+    }
+
     /// Returns a command that runs when any of its output files are needed by
     /// the build and are out-of-date.
     ///

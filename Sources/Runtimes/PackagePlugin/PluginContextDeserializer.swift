@@ -87,6 +87,19 @@ internal struct PluginContextDeserializer {
             }
         }
         let directory = try self.url(for: wireTarget.directoryId)
+        let targetSettings: [TargetSetting] = wireTarget.targetSettings.map {
+            .init(
+                name: $0.name,
+                value: $0.value,
+                condition: $0.condition.map {
+                    .init(
+                        platforms: $0.platforms?.map { .init(name: $0.name) },
+                        config: $0.config.map { .init($0.config) }
+                    )
+                }
+            )
+        }
+
         let target: Target
         switch wireTarget.info {
         
@@ -113,6 +126,7 @@ internal struct PluginContextDeserializer {
                 directory: Path(url: directory),
                 directoryURL: directory,
                 dependencies: dependencies,
+                targetSettings: targetSettings,
                 moduleName: moduleName,
                 sourceFiles: sourceFiles,
                 compilationConditions: compilationConditions,
@@ -146,6 +160,7 @@ internal struct PluginContextDeserializer {
                 directory: Path(url: directory),
                 directoryURL: directory,
                 dependencies: dependencies,
+                targetSettings: targetSettings,
                 moduleName: moduleName,
                 sourceFiles: sourceFiles,
                 preprocessorDefinitions: preprocessorDefinitions,
@@ -182,6 +197,7 @@ internal struct PluginContextDeserializer {
                 directory: Path(url: directory),
                 directoryURL: directory,
                 dependencies: dependencies,
+                targetSettings: targetSettings,
                 moduleName: moduleName,
                 sourceFiles: sourceFiles,
                 swiftCompilationConditions: compilationConditions,
@@ -216,6 +232,7 @@ internal struct PluginContextDeserializer {
                 directory: Path(url: directory),
                 directoryURL: directory,
                 dependencies: dependencies,
+                targetSettings: targetSettings,
                 kind: artifactKind,
                 origin: artifactOrigin,
                 artifact: Path(url: artifact),
@@ -228,11 +245,22 @@ internal struct PluginContextDeserializer {
                 directory: Path(url: directory),
                 directoryURL: directory,
                 dependencies: dependencies,
+                targetSettings: targetSettings,
                 pkgConfig: pkgConfig,
                 compilerFlags: compilerFlags,
                 linkerFlags: linkerFlags)
+
+        case .customTargetInfo:
+            target = try CustomTarget(
+                id: String(id),
+                name: wireTarget.name,
+                directory: Path(url: directory),
+                directoryURL: directory,
+                dependencies: dependencies,
+                targetSettings: targetSettings
+            )
         }
-        
+
         targetsById[id] = target
         return target
     }

@@ -598,6 +598,8 @@ extension TargetDescription.TargetKind {
             self = .plugin
         case .macro:
             self = .macro
+        case .custom:
+            self = .custom
         }
     }
 }
@@ -657,8 +659,18 @@ extension TargetDescription.PluginNetworkPermissionScope {
 extension TargetDescription.PluginUsage {
     init(_ usage: Serialization.PluginUsage) {
         switch usage {
-        case .plugin(let name, let package):
-            self = .plugin(name: name, package: package)
+        case .plugin(let name, let package, let settings):
+            self = .plugin(
+                name: name,
+                package: package,
+                settings: settings?.map {
+                    .init(
+                        name: $0.name,
+                        values: $0.values,
+                        condition: $0.condition.map { .init($0) }
+                    )
+                }
+            )
         }
     }
 }

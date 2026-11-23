@@ -10,16 +10,16 @@
 //
 //===----------------------------------------------------------------------===//
 
-/// Slowly introduces build setting types from the package manifest into the Plugin API.
-/// Once we reach critical mass, set up sharing of these types between them.
+import Foundation
 
 /// A platform supported by Swift Package Manager.
+@available(_PackageDescription, introduced: 999.0)
 public struct Platform: Equatable, Sendable {
 
     /// The name of the platform.
     let name: String
 
-    private init(name: String) {
+    init(name: String) {
         self.name = name
     }
 
@@ -83,11 +83,12 @@ public struct Platform: Equatable, Sendable {
 }
 
 /// The build configuration, such as debug or release.
+@available(_PackageDescription, introduced: 999.0)
 public struct BuildConfiguration: Sendable {
     /// The configuration of the build. Valid values are `debug` and `release`.
     let config: String
 
-    private init(_ config: String) {
+    init(_ config: String) {
         self.config = config
     }
 
@@ -126,13 +127,14 @@ public struct BuildConfiguration: Sendable {
 ///     ]
 /// ),
 /// ```
+@available(_PackageDescription, introduced: 999.0)
 public struct BuildSettingCondition: Sendable {
     /// The applicable platforms for this build setting condition.
     let platforms: [Platform]?
     /// The applicable build configuration for this build setting condition.
     let config: BuildConfiguration?
 
-    private init(platforms: [Platform]?, config: BuildConfiguration?) {
+    init(platforms: [Platform]?, config: BuildConfiguration?) {
         self.platforms = platforms
         self.config = config
     }
@@ -173,6 +175,7 @@ public struct BuildSettingCondition: Sendable {
     }
 }
 
+@available(_PackageDescription, introduced: 999.0)
 public enum BuildSettingUsage: Sendable {
     /// The setting is used only by the target
     case `private`
@@ -186,7 +189,6 @@ public enum BuildSettingUsage: Sendable {
 
 /// The underlying build setting data.
 struct BuildSettingData {
-
     /// The name of the build setting.
     let name: String
 
@@ -201,6 +203,7 @@ struct BuildSettingData {
 }
 
 /// A C language build setting.
+@available(_PackageDescription, introduced: 999.0)
 public struct CSetting: Sendable {
     /// The abstract build setting data.
     let data: BuildSettingData
@@ -228,6 +231,7 @@ public struct CSetting: Sendable {
 }
 
 /// A CXX-language build setting.
+@available(_PackageDescription, introduced: 999.0)
 public struct CXXSetting: Sendable {
     /// The data store for the CXX build setting.
     let data: BuildSettingData
@@ -254,3 +258,129 @@ public struct CXXSetting: Sendable {
     }
 }
 
+/// A linker build setting.
+public struct LinkerSetting: Sendable {
+    /// The data store for the Linker setting.
+    let data: BuildSettingData
+
+    private init(name: String, value: [String], usage: BuildSettingUsage? = nil, condition: BuildSettingCondition?) {
+        self.data = BuildSettingData(name: name, value: value, usage: usage, condition: condition)
+    }
+
+    /// Declares linkage to a system library.
+    ///
+    /// This setting is most useful when the library can't be linked
+    /// automatically, such as C++ based libraries and non-modular libraries.
+    ///
+    /// - Since: First available in PackageDescription 5.0.
+    ///
+    /// - Parameters:
+    ///   - library: The library name.
+    ///   - condition: A condition that restricts the application of the build
+    /// setting.
+    @available(_PackageDescription, introduced: 5.0)
+    public static func linkedLibrary(_ library: String, _ condition: BuildSettingCondition? = nil) -> LinkerSetting {
+        return LinkerSetting(name: "linkedLibrary", value: [library], condition: condition)
+    }
+
+    @available(_PackageDescription, introduced: 999.0)
+    public static func librarySearchPath(_ path: String, _ condition: BuildSettingCondition? = nil) -> LinkerSetting {
+        return LinkerSetting(name: "librarySearchPath", value: [path], usage: .public, condition: condition)
+    }
+
+    /// Declares linkage to a system framework.
+    ///
+    /// This setting is most useful when the framework can't be linked
+    /// automatically, such as C++ based frameworks and non-modular frameworks.
+    ///
+    /// - Since: First available in PackageDescription 5.0.
+    ///
+    /// - Parameters:
+    ///   - framework: The framework name.
+    ///   - condition: A condition that restricts the application of the build
+    /// setting.
+    @available(_PackageDescription, introduced: 5.0)
+    public static func linkedFramework(_ framework: String, _ condition: BuildSettingCondition? = nil) -> LinkerSetting {
+        return LinkerSetting(name: "linkedFramework", value: [framework], condition: condition)
+    }
+
+    @available(_PackageDescription, introduced: 999.0)
+    public static func frameworkSearchPath(_ path: String, _ condition: BuildSettingCondition? = nil) -> LinkerSetting {
+        return LinkerSetting(name: "frameworkSearchPath", value: [path], usage: .public, condition: condition)
+    }
+}
+
+/// Specifies a build product file produced for a custom target.
+@available(_PackageDescription, introduced: 999.0)
+public struct BuildProduct: Sendable {
+    /// The output file location for the build product
+    let url: URL
+
+    /// An optional sub directory in the build product directory to copy the file.
+    let subDir: String?
+
+    /// A condition that restricts when this file is available
+    let condition: BuildSettingCondition?
+
+    public init(_ url: URL, subDir: String? = nil, _ condition: BuildSettingCondition? = nil) {
+        self.url = url
+        self.subDir = subDir
+        self.condition = condition
+    }
+}
+
+@available(_PackageDescription, introduced: 999.0)
+public struct CommandCondition: Sendable {
+    /// The applicable platforms for this build command.
+    let platforms: [Platform]?
+
+    private init(platforms: [Platform]?) {
+        self.platforms = platforms
+    }
+
+    public static func when(
+        platforms: [Platform],
+    ) -> CommandCondition {
+        return CommandCondition(platforms: platforms)
+    }
+}
+
+/// Parameters passed into the plugin from the package manifest.
+@available(_PackageDescription, introduced: 999.0)
+public struct PluginSetting: Sendable {
+    /// The name of the build setting.
+    public var name: String
+
+    /// The value of the build setting.
+    public var value: [String]
+
+    /// A condition that restricts the application of the build setting.
+    public var condition: BuildSettingCondition?
+}
+
+/// Settings the plugin attaches to the target
+@available(_PackageDescription, introduced: 999.0)
+public struct TargetSetting: Sendable {
+    /// The name of the build setting.
+    public var name: String
+
+    /// The value of the build setting.
+    public var value: [String]
+
+    /// A condition that restricts the application of the build setting.
+    public var condition: BuildSettingCondition?
+
+    public init(name: String, value: [String], condition: BuildSettingCondition? = nil) {
+        self.name = name
+        self.value = value
+        self.condition = condition
+    }
+
+    public static func setting(name: String, value: String, _ condition: BuildSettingCondition? = nil) -> TargetSetting {
+        return TargetSetting(name: name, value: [value], condition: condition)
+    }
+
+    public static func setting(name: String, values: [String], _ condition: BuildSettingCondition? = nil) -> TargetSetting {
+        return TargetSetting(name: name, value: values, condition: condition)
+    }
+}

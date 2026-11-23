@@ -27,12 +27,14 @@ public enum PluginAction {
     case createBuildToolCommands(
         package: ResolvedPackage,
         target: ResolvedModule,
+        pluginSettings: [Module.PluginSetting],
         pluginGeneratedSources: [AbsolutePath],
         pluginGeneratedResources: [AbsolutePath]
     )
     case createXcodeProjectBuildToolCommands(
         project: XcodeProjectRepresentation,
         target: XcodeProjectRepresentation.Target,
+        pluginSettings: [Module.PluginSetting],
         pluginGeneratedSources: [AbsolutePath],
         pluginGeneratedResources: [AbsolutePath]
     )
@@ -130,10 +132,17 @@ extension PluginModule {
             let actionMessage: HostToPluginMessage
             switch action {
 
-            case .createBuildToolCommands(let package, let target, let pluginGeneratedSources, let pluginGeneratedResources):
+            case .createBuildToolCommands(let package, let target, let pluginSettings, let pluginGeneratedSources, let pluginGeneratedResources):
                 let rootPackageId = try serializer.serialize(package: package)
                 guard let targetId = try serializer.serialize(target: target) else {
                     throw StringError("unexpectedly was unable to serialize target \(target)")
+                }
+                let pluginSettings: [PluginMessage.Setting] = pluginSettings.map {
+                    .init(
+                        name: $0.name,
+                        value: $0.value,
+                        condition: .init(conditions: $0.conditions)
+                    )
                 }
                 let generatedSources = try pluginGeneratedSources.map { try serializer.serialize(path: $0) }
                 let generatedResources = try pluginGeneratedResources.map { try serializer.serialize(path: $0) }
@@ -145,8 +154,10 @@ extension PluginModule {
                     xcodeTargets: serializer.xcodeTargets,
                     xcodeProjects: serializer.xcodeProjects,
                     pluginWorkDirId: pluginWorkDirId,
+                    pluginSettings: pluginSettings,
                     toolSearchDirIds: toolSearchDirIds,
-                    accessibleTools: accessibleTools)
+                    accessibleTools: accessibleTools
+                )
                 actionMessage = .createBuildToolCommands(
                     context: wireInput,
                     rootPackageId: rootPackageId,
@@ -155,10 +166,17 @@ extension PluginModule {
                     pluginGeneratedResources: generatedResources
                 )
 
-            case .createXcodeProjectBuildToolCommands(let project, let target, let generatedSources, let generatedResources):
+            case .createXcodeProjectBuildToolCommands(let project, let target, let pluginSettings, let generatedSources, let generatedResources):
                 let rootProjectId = try serializer.serialize(xcodeProject: project)
                 guard let targetId = try serializer.serialize(xcodeTarget: target) else {
                     throw StringError("unexpectedly was unable to serialize target \(target)")
+                }
+                let pluginSettings: [PluginMessage.Setting] = pluginSettings.map {
+                    .init(
+                        name: $0.name,
+                        value: $0.value,
+                        condition: .init(conditions: $0.conditions)
+                    )
                 }
                 let pluginGeneratedSources = try generatedSources.map { try serializer.serialize(path: $0) }
                 let pluginGeneratedResources = try generatedResources.map { try serializer.serialize(path: $0) }
@@ -170,8 +188,10 @@ extension PluginModule {
                     xcodeTargets: serializer.xcodeTargets,
                     xcodeProjects: serializer.xcodeProjects,
                     pluginWorkDirId: pluginWorkDirId,
+                    pluginSettings: pluginSettings,
                     toolSearchDirIds: toolSearchDirIds,
-                    accessibleTools: accessibleTools)
+                    accessibleTools: accessibleTools
+                )
                 actionMessage = .createXcodeProjectBuildToolCommands(
                     context: wireInput,
                     rootProjectId: rootProjectId,
@@ -190,8 +210,10 @@ extension PluginModule {
                     xcodeTargets: serializer.xcodeTargets,
                     xcodeProjects: serializer.xcodeProjects,
                     pluginWorkDirId: pluginWorkDirId,
+                    pluginSettings: [],
                     toolSearchDirIds: toolSearchDirIds,
-                    accessibleTools: accessibleTools)
+                    accessibleTools: accessibleTools
+                )
                 actionMessage = .performCommand(
                     context: wireInput,
                     rootPackageId: rootPackageId,
@@ -207,8 +229,10 @@ extension PluginModule {
                     xcodeTargets: serializer.xcodeTargets,
                     xcodeProjects: serializer.xcodeProjects,
                     pluginWorkDirId: pluginWorkDirId,
+                    pluginSettings: [],
                     toolSearchDirIds: toolSearchDirIds,
-                    accessibleTools: accessibleTools)
+                    accessibleTools: accessibleTools
+                )
                 actionMessage = .performXcodeProjectCommand(
                     context: wireInput,
                     rootProjectId: rootProjectId,
@@ -295,7 +319,7 @@ extension PluginModule {
                     }
                     return nil
 
-                case .defineBuildCommand(let config, let inputFiles, let outputFiles):
+                case .defineBuildCommand(let config, let inputFiles, let outputFiles, let alwaysOutOfDate, let condition):
                     if config.version != 2 {
                         throw PluginEvaluationError.pluginUsesIncompatibleVersion(expected: 2, actual: config.version)
                     }
@@ -307,7 +331,10 @@ extension PluginModule {
                             environment: config.environment,
                             workingDirectory: try config.workingDirectory.map{ try $0.filePath },
                             inputFiles: try inputFiles.map{ try $0.filePath },
-                            outputFiles: try outputFiles.map{ try $0.filePath })
+                            outputFiles: try outputFiles.map{ try $0.filePath },
+                            alwaysOutOfDate: alwaysOutOfDate,
+                            conditions: .init(condition: condition)
+                        )
                     }
                     return nil
 
@@ -331,8 +358,12 @@ extension PluginModule {
                     }
                     return nil
 
-                case .defineSettings(let settings):
-                    self.invocationDelegate.pluginDefinedSettings(settings: settings.map { .init(setting: $0) })
+                case .defineTargetInfo(let buildSettings, let targetSettings, let buildProducts):
+                    self.invocationDelegate.pluginDefinedTargetInfo(
+                        buildSettings: buildSettings.map { .init(setting: $0) },
+                        targetSettings: targetSettings.map { .init(setting: $0) },
+                        buildProducts: try buildProducts.map { try .init(product: $0) }
+                    )
                     return nil
 
                 case .buildOperationRequest(let subset, let parameters):
@@ -475,7 +506,7 @@ extension PluginModule {
             diagnostics.append(.error(invocationError))
         }
 
-        if case let .createBuildToolCommands(package: _, target: target, pluginGeneratedSources: _, pluginGeneratedResources: _) = action {
+        if case let .createBuildToolCommands(package: _, target: target, pluginSettings: _, pluginGeneratedSources: _, pluginGeneratedResources: _) = action {
             for setting in delegate.buildSettings {
                 switch setting.name {
                 case "headerSearchPath":
@@ -490,9 +521,54 @@ extension PluginModule {
                         conditions: setting.conditions
                     )
                     target.underlying.buildSettings.add(assignment, for: .ABSOLUTE_HEADER_SEARCH_PATHS)
+                case "linkedLibrary":
+                    let assignment = PackageModel.BuildSettings.Assignment(
+                        values: setting.value,
+                        usage: setting.usage,
+                        conditions: setting.conditions
+                    )
+                    target.underlying.buildSettings.add(assignment, for: .LINK_LIBRARIES)
+                case "linkedFramework":
+                    let assignment = PackageModel.BuildSettings.Assignment(
+                        values: setting.value,
+                        usage: setting.usage,
+                        conditions: setting.conditions
+                    )
+                    target.underlying.buildSettings.add(assignment, for: .LINK_FRAMEWORKS)
+                case "librarySearchPath":
+                    guard let pathStr = setting.value.first else {
+                        break
+                    }
+                    let path = try RelativePath(validating: pathStr)
+                    let value = outputDirectory.appending(path).pathString
+                    let assignment = PackageModel.BuildSettings.Assignment(
+                        values: [value],
+                        usage: setting.usage,
+                        conditions: setting.conditions
+                    )
+                    target.underlying.buildSettings.add(assignment, for: .ABSOLUTE_LIBRARY_SEARCH_PATHS)
+                case "frameworkSearchPath":
+                    guard let pathStr = setting.value.first else {
+                        break
+                    }
+                    let path = try RelativePath(validating: pathStr)
+                    let value = outputDirectory.appending(path).pathString
+                    let assignment = PackageModel.BuildSettings.Assignment(
+                        values: [value],
+                        usage: setting.usage,
+                        conditions: setting.conditions
+                    )
+                    target.underlying.buildSettings.add(assignment, for: .ABSOLUTE_FRAMEWORK_SEARCH_PATHS)
                 default:
                     break
                 }
+            }
+            for setting in delegate.targetSettings {
+                target.underlying.targetSettings.append(.init(
+                    name: setting.name,
+                    value: setting.value,
+                    conditions: setting.conditions
+                ))
             }
         }
 
@@ -506,7 +582,8 @@ extension PluginModule {
             diagnostics: diagnostics,
             textOutput: String(decoding: delegate.outputData, as: UTF8.self),
             buildCommands: delegate.buildCommands,
-            prebuildCommands: delegate.prebuildCommands
+            prebuildCommands: delegate.prebuildCommands,
+            buildProducts: delegate.buildProducts.map { .init(path: $0.path, subDir: $0.subDir, condition: $0.conditions) }
         )
     }
 }
@@ -717,11 +794,21 @@ public struct BuildToolPluginInvocationResult {
     /// The prebuild commands generated by the plugin (in the order in which they should run).
     public var prebuildCommands: [PrebuildCommand]
 
+    public var buildProducts: [BuildProduct]
+
+    public struct BuildProduct {
+        public var path: AbsolutePath
+        public var subDir: RelativePath?
+        public var condition: [PackageCondition]
+    }
+
     /// A command to incorporate into the build graph so that it runs during the build whenever it needs to.
     public struct BuildCommand {
         public var configuration: CommandConfiguration
         public var inputFiles: [AbsolutePath]
         public var outputFiles: [AbsolutePath]
+        public var alwaysOutOfDate: Bool
+        public var conditions: [PackageCondition]
     }
 
     /// A command to run before the start of every build.
@@ -782,13 +869,27 @@ public protocol PluginInvocationDelegate {
     func pluginEmittedProgress(_: String)
 
     /// Called when a plugin defines a build command through the PackagePlugin APIs.
-    func pluginDefinedBuildCommand(displayName: String?, executable: AbsolutePath, arguments: [String], environment: [String: String], workingDirectory: AbsolutePath?, inputFiles: [AbsolutePath], outputFiles: [AbsolutePath])
+    func pluginDefinedBuildCommand(
+        displayName: String?,
+        executable: AbsolutePath,
+        arguments: [String],
+        environment: [String: String],
+        workingDirectory: AbsolutePath?,
+        inputFiles: [AbsolutePath],
+        outputFiles: [AbsolutePath],
+        alwaysOutOfDate: Bool,
+        conditions: [PackageCondition]
+    )
 
     /// Called when a plugin defines a prebuild command through the PackagePlugin APIs.
     func pluginDefinedPrebuildCommand(displayName: String?, executable: AbsolutePath, arguments: [String], environment: [String: String], workingDirectory: AbsolutePath?, outputFilesDirectory: AbsolutePath) -> Bool
 
     /// Called when a plugin requests build settings to be applied to the target
-    func pluginDefinedSettings(settings: [PluginBuildSetting])
+    func pluginDefinedTargetInfo(
+        buildSettings: [PluginBuildSetting],
+        targetSettings: [PluginSetting],
+        buildProducts: [PluginBuildProduct]
+    )
 
     /// Called when a plugin requests a build operation through the PackagePlugin APIs.
     func pluginRequestedBuildOperation(subset: PluginInvocationBuildSubset, parameters: PluginInvocationBuildParameters) async throws -> PluginInvocationBuildResult
@@ -810,6 +911,8 @@ final class DefaultPluginInvocationDelegate: PluginInvocationDelegate {
     var buildCommands = [BuildToolPluginInvocationResult.BuildCommand]()
     var prebuildCommands = [BuildToolPluginInvocationResult.PrebuildCommand]()
     var buildSettings = [PluginBuildSetting]()
+    var targetSettings = [PluginSetting]()
+    var buildProducts = [PluginBuildProduct]()
 
     package init(
         fileSystem: FileSystem,
@@ -848,7 +951,9 @@ final class DefaultPluginInvocationDelegate: PluginInvocationDelegate {
         environment: [String: String],
         workingDirectory: AbsolutePath?,
         inputFiles: [AbsolutePath],
-        outputFiles: [AbsolutePath]
+        outputFiles: [AbsolutePath],
+        alwaysOutOfDate: Bool,
+        conditions: [PackageCondition]
     ) {
         dispatchPrecondition(condition: .onQueue(self.delegateQueue))
         self.buildCommands.append(.init(
@@ -860,7 +965,9 @@ final class DefaultPluginInvocationDelegate: PluginInvocationDelegate {
                 workingDirectory: workingDirectory
             ),
             inputFiles: self.toolPaths + inputFiles,
-            outputFiles: outputFiles
+            outputFiles: outputFiles,
+            alwaysOutOfDate: alwaysOutOfDate,
+            conditions: conditions
         ))
     }
 
@@ -896,8 +1003,14 @@ final class DefaultPluginInvocationDelegate: PluginInvocationDelegate {
         return true
     }
 
-    func pluginDefinedSettings(settings: [PluginBuildSetting]) {
-        self.buildSettings = settings
+    func pluginDefinedTargetInfo(
+        buildSettings: [PluginBuildSetting],
+        targetSettings: [PluginSetting],
+        buildProducts: [PluginBuildProduct]
+    ) {
+        self.buildSettings += buildSettings
+        self.targetSettings += targetSettings
+        self.buildProducts += buildProducts
     }
 }
 
@@ -1019,7 +1132,7 @@ public struct PluginBuildSetting {
     public let usage: BuildSettings.Assignment.Usage?
     public let conditions: [PackageCondition]
 
-    init(setting: PluginToHostMessage.BuildSetting) {
+    init(setting: PluginMessage.BuildSetting) {
         self.name = setting.name
         self.value = setting.value
         self.usage = setting.usage.map { .init(usage: $0) }
@@ -1027,13 +1140,50 @@ public struct PluginBuildSetting {
     }
 }
 
+public struct PluginSetting {
+    public let name: String
+    public let value: [String]
+    public let conditions: [PackageCondition]
+
+    init(setting: PluginMessage.Setting) {
+        self.name = setting.name
+        self.value = setting.value
+        self.conditions = .init(condition: setting.condition)
+    }
+}
+
+public struct PluginBuildProduct {
+    public let path: AbsolutePath
+    public let subDir: RelativePath?
+    public let conditions: [PackageCondition]
+
+    init(product: PluginToHostMessage.BuildProduct) throws {
+        self.path = try product.url.filePath
+        self.subDir = try product.subDir.map { try RelativePath(validating: $0) }
+        self.conditions = .init(condition: product.condition)
+    }
+}
+
 public extension PluginInvocationDelegate {
-    func pluginDefinedBuildCommand(displayName: String?, executable: AbsolutePath, arguments: [String], environment: [String: String], workingDirectory: AbsolutePath?, inputFiles: [AbsolutePath], outputFiles: [AbsolutePath]) {
+    func pluginDefinedBuildCommand(
+        displayName: String?,
+        executable: AbsolutePath,
+        arguments: [String],
+        environment: [String: String],
+        workingDirectory: AbsolutePath?,
+        inputFiles: [AbsolutePath],
+        outputFiles: [AbsolutePath],
+        alwaysOutOfDate: Bool,
+        conditions: [PackageCondition]
+    ) {
     }
     func pluginDefinedPrebuildCommand(displayName: String?, executable: AbsolutePath, arguments: [String], environment: [String: String], workingDirectory: AbsolutePath?, outputFilesDirectory: AbsolutePath) -> Bool {
         return true
     }
-    func pluginDefinedSettings(settings: [PluginBuildSetting]) {
+    func pluginDefinedTargetInfo(
+        buildSettings: [PluginBuildSetting],
+        targetSettings: [PluginSetting],
+        buildProducts: [PluginBuildProduct]) {
     }
     func pluginRequestedBuildOperation(subset: PluginInvocationBuildSubset, parameters: PluginInvocationBuildParameters) async throws -> PluginInvocationBuildResult {
         throw StringError("unimplemented")
@@ -1266,7 +1416,7 @@ extension ObservabilityMetadata {
 }
 
 extension BuildSettings.Assignment.Usage {
-    init(usage: PluginToHostMessage.BuildSettingUsage) {
+    init(usage: PluginMessage.BuildSettingUsage) {
         self = switch usage {
         case .public:
             .public
@@ -1278,8 +1428,16 @@ extension BuildSettings.Assignment.Usage {
     }
 }
 
+extension PluginMessage.BuildSettingCondition {
+    init(conditions: [PackageCondition]) {
+        let platforms = conditions.flatMap { $0.platformsCondition?.platforms.map({ PluginMessage.Platform(name: $0.name)}) ?? [] }
+        let config = conditions.first(where: { $0.configurationCondition != nil })?.configurationCondition?.configuration.rawValue
+        self.init(platforms: platforms, config: config.map { .init(config: $0) })
+    }
+}
+
 extension [PackageCondition] {
-    init(condition: PluginToHostMessage.BuildSettingCondition?) {
+    init(condition: PluginMessage.BuildSettingCondition?) {
         self.init()
         if let conditionPlatforms = condition?.platforms {
             let platforms = conditionPlatforms.map {
@@ -1300,6 +1458,17 @@ extension [PackageCondition] {
                 .debug
             }
             self.append(.init(configuration: config))
+        }
+    }
+
+    init(condition: PluginToHostMessage.CommandCondition?) {
+        self.init()
+        if let conditionPlatforms = condition?.platforms {
+            let platforms = conditionPlatforms.map {
+                PlatformRegistry.default.platformByName[$0.name]
+                ?? PackageModel.Platform.custom(name: $0.name, oldestSupportedVersion: .unknown)
+            }
+            self.append(.init(platforms: platforms))
         }
     }
 }

@@ -37,41 +37,26 @@ let package = Package(
     ],
     targets: [
         .plugin(
-            name: "SwiftSDLGenPlugin",
+            name: "SDLCMakeBuilderPlugin",
             capability: .buildTool,
-            dependencies: ["SwiftSDLGenerator"]
+            dependencies: ["SDLCMakeBuilder"]
         ),
         .executableTarget(
-            name: "SwiftSDLGenerator",
+            name: "SDLCMakeBuilder",
             dependencies: [
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "Subprocess", package: "swift-subprocess"),
                 .product(name: "SystemPackage", package: "swift-system"),
-                .product(name: "SwiftSyntax", package: "swift-syntax"),
-                .product(name: "SwiftParser", package: "swift-syntax"),
             ]
         ),
-        .macro(
-            name: "SwiftSDLMacros",
-            dependencies: [
-                .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
-                .product(name: "SwiftSyntaxBuilder", package: "swift-syntax"),
-                .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
-            ]
-        ),
-        .target(
-            name: "SwiftSDL",
-            dependencies: [
-                "SwiftSDLMacros",
-            ],
+        .custom(
+            name: "SDL",
+            path: "SDL",
             cSettings: [
-                .headerSearchPath("../../SDL/include", usage: .public),
+                .headerSearchPath("include", usage: .public),
             ],
             linkerSettings: [
                 .linkedLibrary("SDL3"),
-                .librarySearchPath("../../SDL/build-macos", .when(platforms: [.macOS])),
-                .librarySearchPath("../../SDL/build-ios", .when(platforms: [.iOS])),
-                .librarySearchPath("../../SDL/build-android", .when(platforms: [.android])),
 
                 .linkedFramework("CoreMedia", .when(platforms: [.macOS, .iOS])),
                 .linkedFramework("CoreVideo", .when(platforms: [.macOS, .iOS])),
@@ -121,6 +106,44 @@ let package = Package(
                 .linkedLibrary("setupapi", .when(platforms: [.windows])),
                 .linkedLibrary("shell32", .when(platforms: [.windows])),
                 .linkedLibrary("dinput8", .when(platforms: [.windows])),
+            ],
+            plugins: [
+                .plugin(
+                    name: "SDLCMakeBuilderPlugin",
+                    settings: [
+                        .setting(name: "banana", value: "rama", .when(platforms: [.macOS])),
+                    ]
+                )
+            ]
+        ),
+        .plugin(
+            name: "SwiftSDLGenPlugin",
+            capability: .buildTool,
+            dependencies: ["SwiftSDLGenerator"]
+        ),
+        .executableTarget(
+            name: "SwiftSDLGenerator",
+            dependencies: [
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+                .product(name: "Subprocess", package: "swift-subprocess"),
+                .product(name: "SystemPackage", package: "swift-system"),
+                .product(name: "SwiftSyntax", package: "swift-syntax"),
+                .product(name: "SwiftParser", package: "swift-syntax"),
+            ]
+        ),
+        .macro(
+            name: "SwiftSDLMacros",
+            dependencies: [
+                .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
+                .product(name: "SwiftSyntaxBuilder", package: "swift-syntax"),
+                .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
+            ]
+        ),
+        .target(
+            name: "SwiftSDL",
+            dependencies: [
+                "SwiftSDLMacros",
+                "SDL",
             ],
             plugins: [
                 "SwiftSDLGenPlugin",

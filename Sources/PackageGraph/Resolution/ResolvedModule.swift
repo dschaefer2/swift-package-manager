@@ -190,11 +190,15 @@ public struct ResolvedModule {
         self.underlying.implicit
     }
 
+    /// The settings to be passed to plugins used by this target.
+    public let pluginSettings: [ID: [Module.PluginSetting]]
+
     /// Create a resolved module instance.
     public init(
         packageIdentity: PackageIdentity,
         underlying: Module,
-        dependencies: [ResolvedModule.Dependency],
+        dependencies: [Dependency],
+        pluginSettings: [ID: [Module.PluginSetting]] = [:],
         defaultLocalization: String? = nil,
         supportedPlatforms: [SupportedPlatform],
         platformVersionProvider: PlatformVersionProvider,
@@ -203,6 +207,7 @@ public struct ResolvedModule {
         self.packageIdentity = packageIdentity
         self.underlying = underlying
         self.dependencies = dependencies
+        self.pluginSettings = pluginSettings
         self.defaultLocalization = defaultLocalization
         self.supportedPlatforms = supportedPlatforms
         self.platformVersionProvider = platformVersionProvider

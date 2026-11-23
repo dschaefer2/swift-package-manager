@@ -44,7 +44,7 @@ public final class PluginModule: Module {
             packageAccess: packageAccess,
             buildSettings: .init(),
             buildSettingsDescription: [],
-            pluginUsages: [],
+            pluginSettings: [:],
             usesUnsafeFlags: false,
             implicit: false
         )

@@ -47,7 +47,7 @@ public final class SwiftModule: Module {
             packageAccess: packageAccess,
             buildSettings: buildSettings,
             buildSettingsDescription: [],
-            pluginUsages: [],
+            pluginSettings: [:],
             usesUnsafeFlags: false,
             implicit: implicit
         )
@@ -81,6 +81,7 @@ public final class SwiftModule: Module {
         buildSettings: BuildSettings.AssignmentTable = .init(),
         buildSettingsDescription: [TargetBuildSettingDescription.Setting] = [],
         pluginUsages: [PluginUsage] = [],
+        pluginSettings: [Dependency.ID: [PluginSetting]] = [:],
         usesUnsafeFlags: Bool,
         implicit: Bool
     ) {
@@ -99,7 +100,7 @@ public final class SwiftModule: Module {
             packageAccess: packageAccess,
             buildSettings: buildSettings,
             buildSettingsDescription: buildSettingsDescription,
-            pluginUsages: pluginUsages,
+            pluginSettings: pluginSettings,
             usesUnsafeFlags: usesUnsafeFlags,
             implicit: implicit
         )
@@ -149,7 +150,7 @@ public final class SwiftModule: Module {
             packageAccess: packageAccess,
             buildSettings: buildSettings,
             buildSettingsDescription: [],
-            pluginUsages: [],
+            pluginSettings: [:],
             usesUnsafeFlags: false,
             implicit: true
         )

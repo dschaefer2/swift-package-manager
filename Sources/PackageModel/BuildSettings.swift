@@ -38,8 +38,10 @@ public enum BuildSettings {
         public static let OTHER_LDFLAGS: Declaration = .init("OTHER_LDFLAGS")
         public static let LINK_LIBRARIES: Declaration = .init("LINK_LIBRARIES")
         public static let LINK_FRAMEWORKS: Declaration = .init("LINK_FRAMEWORKS")
-        public static let LIBRARY_SEARCH_PATH: Declaration = .init("LIBRARY_SEARCH_PATH")
-        public static let FRAMEWORK_SEARCH_PATH: Declaration = .init("FRAMEWORK_SEARCH_PATH")
+        public static let LIBRARY_SEARCH_PATHS: Declaration = .init("LIBRARY_SEARCH_PATH")
+        public static let ABSOLUTE_LIBRARY_SEARCH_PATHS: Declaration = .init("ABSOLUTE_LIBRARY_SEARCH_PATH")
+        public static let FRAMEWORK_SEARCH_PATHS: Declaration = .init("FRAMEWORK_SEARCH_PATH")
+        public static let ABSOLUTE_FRAMEWORK_SEARCH_PATHS: Declaration = .init("ABSOLUTE_FRAMEWORK_SEARCH_PATH")
 
         /// The declaration name.
         public let name: String

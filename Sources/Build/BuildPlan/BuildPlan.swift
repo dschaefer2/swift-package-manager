@@ -821,6 +821,7 @@ extension BuildPlan {
                 action: .createBuildToolCommands(
                     package: package,
                     target: module,
+                    pluginSettings: module.pluginSettings[plugin.id] ?? [],
                     pluginGeneratedSources: pluginDerivedSources.paths,
                     pluginGeneratedResources: pluginDerivedResources.map(\.path)
                 ),

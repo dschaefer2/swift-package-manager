@@ -1344,7 +1344,7 @@ fileprivate extension Module.Kind {
         switch self {
         case .executable, .library, .macro, .plugin:
             return true
-        case .test, .snippet, .binary, .systemModule, .prebuilt:
+        case .test, .snippet, .binary, .systemModule, .prebuilt, .custom:
             return false
         }
     }

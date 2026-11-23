@@ -30,6 +30,7 @@ public class Module {
         case snippet
         case `macro`
         case prebuilt
+        case custom
     }
 
     /// A reference to a product from a module dependency.
@@ -73,6 +74,19 @@ public class Module {
         /// A dependency referencing a product, with conditions.
         case product(_ product: ProductReference, conditions: [PackageCondition])
 
+        public enum ID: Hashable {
+            case module(name: String)
+            case product(name: String, package: String?)
+        }
+
+        public var id: ID {
+            switch self {
+            case .module(let target, _):
+                return .module(name: target.name)
+            case .product(let product, _):
+                return .product(name: product.name, package: product.package)
+            }
+        }
 
         @available(*, deprecated, renamed: "module")
         public var target: Module? { self.module }
@@ -121,6 +135,18 @@ public class Module {
     /// have exactly the same characteristics and to avoid duplicating the
     /// implementation for now.
     public typealias PluginUsage = Dependency
+
+    public struct PluginSetting: Hashable {
+        public let name: String
+        public let value: [String]
+        public let conditions: [PackageCondition]
+
+        public init(name: String, value: [String], conditions: [PackageCondition]) {
+            self.name = name
+            self.value = value
+            self.conditions = conditions
+        }
+    }
 
     /// The name of the module.
     ///
@@ -211,8 +237,23 @@ public class Module {
     @_spi(SwiftPMInternal)
     public let buildSettingsDescription: [TargetBuildSettingDescription.Setting]
 
-    /// The usages of package plugins by this module.
-    public let pluginUsages: [PluginUsage]
+    public struct TargetSetting {
+        public let name: String
+        public let value: [String]
+        public let conditions: [PackageCondition]
+
+        public init(name: String, value: [String], conditions: [PackageCondition]) {
+            self.name = name
+            self.value = value
+            self.conditions = conditions
+        }
+    }
+
+    /// Settings added to the target from plugins
+    public package(set) var targetSettings: [TargetSetting] = []
+
+    /// The plugins settings
+    public let pluginSettings: [Dependency.ID: [PluginSetting]]
 
     /// Whether or not this target uses any custom unsafe flags.
     public let usesUnsafeFlags: Bool
@@ -234,7 +275,7 @@ public class Module {
         packageAccess: Bool,
         buildSettings: BuildSettings.AssignmentTable,
         buildSettingsDescription: [TargetBuildSettingDescription.Setting],
-        pluginUsages: [PluginUsage],
+        pluginSettings: [Dependency.ID: [PluginSetting]],
         usesUnsafeFlags: Bool,
         implicit: Bool
     ) {
@@ -251,7 +292,7 @@ public class Module {
         self.packageAccess = packageAccess
         self.buildSettings = buildSettings
         self.buildSettingsDescription = buildSettingsDescription
-        self.pluginUsages = pluginUsages
+        self.pluginSettings = pluginSettings
         self.usesUnsafeFlags = usesUnsafeFlags
         self.implicit = implicit
     }

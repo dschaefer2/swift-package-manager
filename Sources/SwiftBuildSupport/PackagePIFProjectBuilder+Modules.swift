@@ -97,7 +97,7 @@ extension PackagePIFProjectBuilder {
                         )
                     }
 
-                case .library, .systemModule, .test, .binary, .plugin, .macro, .prebuilt:
+                case .library, .systemModule, .test, .binary, .plugin, .macro, .prebuilt, .custom:
                     let dependencyGUID = moduleDependency.pifTargetGUID
                     pluginTarget.common.addDependency(
                         on: dependencyGUID,
@@ -967,6 +967,14 @@ extension PackagePIFProjectBuilder {
                     )
                     log(.debug, indent: 1, "Added use of plugin target '\(dependencyGUID)'")
 
+                case .custom:
+                    moduleTarget.common.addDependency(
+                        on: moduleDependency.pifTargetGUID,
+                        platformFilters: dependencyPlatformFilters,
+                        linkProduct: false
+                    )
+                    log(.debug, indent: 1, "Added use of custom target '\(moduleDependency.pifTargetGUID)'")
+
                 case .library, .test, .macro, .systemModule, .prebuilt:
                     moduleTarget.common.addDependency(
                         on: moduleDependency.pifTargetGUID,
@@ -1217,6 +1225,90 @@ extension PackagePIFProjectBuilder {
             toolsVersion: pifBuilder.packageManifest.toolsVersion
         )
         self.builtModulesAndProducts.append(systemModule)
+    }
+
+    mutating func makeCustomTarget(_ resolvedTarget: PackageGraph.ResolvedModule) throws {
+        let customTargetKeyPath = try self.project.addAggregateTarget { _ in
+            ProjectModel.AggregateTarget(
+                id: resolvedTarget.pifTargetGUID,
+                name: resolvedTarget.name
+            )
+        }
+        do {
+            let customTarget = self.project[keyPath: customTargetKeyPath]
+            log(
+                .debug,
+                "Created aggregate target '\(customTarget.id)' with name '\(customTarget.name)'"
+            )
+        }
+
+        let allBuildSettings = try resolvedTarget.computeAllBuildSettings(observabilityScope: pifBuilder.observabilityScope, forRemotePackage: pifBuilder.delegate.isRemote)
+
+        let buildSettings = self.package.underlying.packageBaseBuildSettings
+        var debugSettings = buildSettings
+        var releaseSettings = buildSettings
+        let impartedSettings = BuildSettings()
+        var debugImpartedSettings = impartedSettings
+        var releaseImpartedSettings = impartedSettings
+
+        allBuildSettings.apply(to: &debugSettings, for: .debug)
+        allBuildSettings.apply(to: &releaseSettings, for: .release)
+        allBuildSettings.applyImparted(to: &debugImpartedSettings, for: .debug)
+        allBuildSettings.applyImparted(to: &releaseImpartedSettings, for: .release)
+
+        self.project[keyPath: customTargetKeyPath].common.addBuildConfig { id in
+            BuildConfig(id: id, name: "Debug", settings: debugSettings, impartedBuildSettings: debugImpartedSettings)
+        }
+        self.project[keyPath: customTargetKeyPath].common.addBuildConfig { id in
+            BuildConfig(id: id, name: "Release", settings: releaseSettings, impartedBuildSettings: releaseImpartedSettings)
+        }
+
+        var buildProducts: [(FileReference, Set<ProjectModel.PlatformFilter>)] = []
+        if let pluginResults = pifBuilder.buildToolPluginResultsByTargetName[resolvedTarget.name] {
+            for pluginResult in pluginResults {
+                for command in pluginResult.buildCommands {
+                    addBuildToolCommand(command, to: customTargetKeyPath)
+                }
+
+                for buildProduct in pluginResult.buildProducts {
+                    let file = resolveBuildToolVariables(buildProduct.path.pathString)
+                    let fileRef = self.binaryGroup.addFileReference { id in
+                        FileReference(id: id, path: file)
+                    }
+
+                    buildProducts.append((fileRef, buildProduct.platforms))
+                }
+            }
+        }
+
+        if !buildProducts.isEmpty {
+            self.project[keyPath: customTargetKeyPath].common.addCopyFilesBuildPhase { id in
+                var phase = ProjectModel.CopyFilesBuildPhase(common: .init(id: id), destinationSubfolder: .builtProductsDir)
+
+                for buildProduct in buildProducts {
+                    phase.common.addBuildFile { id in
+                        BuildFile(id: id, fileRef: buildProduct.0, platformFilters: buildProduct.1)
+                    }
+                }
+
+                return phase
+            }
+        }
+
+        let customPIFTarget = PackagePIFBuilder.ModuleOrProduct(
+            type: .module,
+            name: resolvedTarget.name,
+            moduleName: nil,
+            pifTarget: .aggregate(self.project[keyPath: customTargetKeyPath]),
+            indexableFileURLs: [],
+            headerFiles: [],
+            linkedPackageBinaries: [],
+            swiftLanguageVersion: nil,
+            declaredPlatforms: self.declaredPlatforms,
+            deploymentTargets: self.deploymentTargets,
+            toolsVersion: pifBuilder.packageManifest.toolsVersion
+        )
+        self.builtModulesAndProducts.append(customPIFTarget)
     }
 
     mutating func makePrebuiltTarget(_ resolvedPrebuilt: PackageGraph.ResolvedModule) throws {

@@ -603,7 +603,7 @@ private func createResolvedPackages(
         // package.
         let modulesMap = moduleBuilders.spm_createDictionary { ($0.module, $0) }
         for moduleBuilder in moduleBuilders {
-            moduleBuilder.dependencies += try moduleBuilder.module.dependencies.compactMap { dependency in
+            let moduleDependencies: [ResolvedModuleBuilder.Dependency] = try moduleBuilder.module.dependencies.compactMap { dependency in
                 switch dependency {
                 case .module(let moduleDependency, let conditions):
                     try moduleBuilder.module.validateDependency(module: moduleDependency)
@@ -614,11 +614,15 @@ private func createResolvedPackages(
                         && !dependencyBuilder.isTestSupportModule {
                         dependencyBuilder.isTestSupportModule = true
                     }
+                    if let pluginSettings = moduleBuilder.module.pluginSettings[.module(name: moduleDependency.name)] {
+                        moduleBuilder.pluginSettings[.init(moduleName: moduleDependency.name, packageIdentity: packageBuilder.package.identity)] = pluginSettings
+                    }
                     return .module(dependencyBuilder, conditions: conditions)
                 case .product:
                     return nil
                 }
             }
+            moduleBuilder.dependencies += moduleDependencies
             moduleBuilder.defaultLocalization = packageBuilder.defaultLocalization
             moduleBuilder.supportedPlatforms = packageBuilder.supportedPlatforms
         }
@@ -799,6 +803,12 @@ private func createResolvedPackages(
                 }
 
                 moduleBuilder.dependencies.append(.product(product, conditions: conditions))
+
+                if let pluginSettings = moduleBuilder.module.pluginSettings[.product(name: productRef.name, package: productRef.package)] {
+                    for module in product.moduleBuilders {
+                        moduleBuilder.pluginSettings[.init(moduleName: module.module.name, packageIdentity: product.packageBuilder.package.identity)] = pluginSettings
+                    }
+                }
             }
         }
     }
@@ -888,7 +898,7 @@ private func createResolvedPackages(
         if let cycle = findCycle(moduleBuilders, successors: {
             $0.item.dependencies.flatMap {
                 switch $0 {
-                case .product(let productBuilder, conditions: _):
+                case .product(let productBuilder, _):
                     return productBuilder.moduleBuilders.map { KeyedPair($0, key: $0.module) }
                 case .module:
                     return [] // local modules were checked by PackageBuilder.
@@ -949,7 +959,7 @@ private func createResolvedPackages(
 
                 for moduleBuilder in packageBuilder.modules {
                     let prebuiltLibraries = moduleBuilder.dependencies.reduce(into: [String: PrebuiltLibrary]()) {
-                        guard case .product(let productBuilder, conditions: _) = $1,
+                        guard case .product(let productBuilder, _) = $1,
                               let prebuilt = productBuilder.packageBuilder.prebuilts?.first(where: {
                                   $0.products.contains(productBuilder.product.name)
                               })
@@ -1313,13 +1323,16 @@ private final class ResolvedModuleBuilder: ResolvedBuilder<ResolvedModule> {
     /// The module dependencies of this module.
     var dependencies: [Dependency] = []
 
+    /// Settings for plugins used by this target
+    var pluginSettings: [ResolvedModule.ID: [Module.PluginSetting]] = [:]
+
     /// All the modules this module depends on ignoring the conditions
     var allModuleDependencies: [ResolvedModuleBuilder] {
         dependencies.flatMap {
             switch $0 {
-            case .module(let childModule, conditions: _):
+            case .module(let childModule, _):
                 return [childModule]
-            case .product(let childProduct, conditions: _):
+            case .product(let childProduct, _):
                 return childProduct.moduleBuilders
             }
         }
@@ -1389,6 +1402,7 @@ private final class ResolvedModuleBuilder: ResolvedBuilder<ResolvedModule> {
             packageIdentity: self.packageIdentity,
             underlying: self.module,
             dependencies: dependencies,
+            pluginSettings: self.pluginSettings,
             defaultLocalization: self.defaultLocalization,
             supportedPlatforms: self.supportedPlatforms,
             platformVersionProvider: self.platformVersionProvider,

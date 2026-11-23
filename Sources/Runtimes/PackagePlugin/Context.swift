@@ -52,6 +52,10 @@ public struct PluginContext {
     @available(_PackageDescription, introduced: 6.0)
     public let pluginWorkDirectoryURL: URL
 
+    /// The settings for the usage of this plugin on a target.
+    @available(_PackageDescription, introduced: 999.0)
+    public let pluginSettings: [PluginSetting]
+
     /// Finds a command-line executable available to the plugin.
     ///
     /// The plugin host first looks for a matching tool provided by a direct

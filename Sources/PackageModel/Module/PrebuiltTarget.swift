@@ -61,7 +61,7 @@ public final class PrebuiltTarget: Module {
             packageAccess: false,
             buildSettings: buildSettings,
             buildSettingsDescription: [],
-            pluginUsages: [],
+            pluginSettings: [:],
             usesUnsafeFlags: false,
             implicit: false
         )

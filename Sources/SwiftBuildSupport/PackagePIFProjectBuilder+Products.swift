@@ -539,7 +539,7 @@ extension PackagePIFProjectBuilder {
                         "Added linked dependency on target '\(dependencyGUID)'"
                     )
 
-                case .systemModule, .prebuilt:
+                case .systemModule, .prebuilt, .custom:
                     let dependencyGUID = moduleDependency.pifTargetGUID
                     mainModuleTarget.common.addDependency(
                         on: dependencyGUID,
@@ -910,6 +910,17 @@ extension PackagePIFProjectBuilder {
                         linkProduct: false
                     )
                     log(.debug, indent: 1, "Added use of plugin target '\(dependencyId)'")
+                    return
+                }
+
+                if moduleDependency.type == .custom {
+                    let dependencyId = moduleDependency.pifTargetGUID
+                    libraryUmbrellaTarget.common.addDependency(
+                        on: dependencyId,
+                        platformFilters: dependencyPlatformFilters,
+                        linkProduct: false
+                    )
+                    log(.debug, indent: 1, "Added use of custom target '\(dependencyId)'")
                     return
                 }
 

@@ -10,6 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+import Foundation
+
 // A future improvement to the package manager would be to allow use of
 // a plugin to also provide configuration parameters for that plugin.
 // Any proposal that adds such a facility should also add initializers
@@ -43,6 +45,32 @@ public protocol BuildToolPlugin: Plugin {
         context: PluginContext,
         target: Target
     ) async throws -> [Command]
+
+    @available(_PackageDescription, introduced: 999.0)
+    func createBuildCommands(
+        context: PluginContext,
+        target: Target,
+        pluginSettings: [PluginSetting]
+    ) async throws -> [Command]
+}
+
+extension BuildToolPlugin {
+    @available(_PackageDescription, introduced: 999.0)
+    public func createBuildCommands(
+        context: PluginContext,
+        target: Target,
+        pluginSettings: [PluginSetting]
+    ) async throws -> [Command] {
+        try await createBuildCommands(context: context, target: target)
+    }
+
+    public func createBuildCommands(
+        context: PluginContext,
+        target: Target
+    ) async throws -> [Command] {
+        Diagnostics.error("Missing createBuildCommands function in plugin")
+        return []
+    }
 }
 
 /// The plugin protocol that defines functionality for all plugins that have a command capability.

@@ -280,13 +280,13 @@ extension Workspace {
                     }
 
                     let modifiedPluginUsages = target.pluginUsages?.map { usage in
-                        guard case .plugin(let name, .some(let packageName)) = usage,
+                        guard case .plugin(let name, .some(let packageName), let settings) = usage,
                               let modifiedPackageName =
                               targetDependencyPackageNameTransformations[packageName.lowercased()]
                         else {
                             return usage
                         }
-                        return TargetDescription.PluginUsage.plugin(name: name, package: modifiedPackageName)
+                        return TargetDescription.PluginUsage.plugin(name: name, package: modifiedPackageName, settings: settings)
                     }
 
                     try modifiedTargets.append(

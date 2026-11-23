@@ -414,8 +414,9 @@ final class PackagePIFProjectBuilder: PIFProjectBuilder {
         case .macro:
             // Macros are not supported when using XCBuild, similar to package plugins.
             return
-        case .prebuilt:
-            fatalError("TODO")
+        case .prebuilt, .custom:
+            // These are only supported with SwiftBuild
+            return
         }
     }
 
